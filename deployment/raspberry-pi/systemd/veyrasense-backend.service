@@ -6,7 +6,7 @@ Description=VeyraSense Industrial Edge Gateway API (FastAPI)
 Wants=network-online.target
 After=network-online.target mosquitto.service
 
-# Restart if the backend exits unexpectedly.
+# Restart limits.
 StartLimitIntervalSec=300
 StartLimitBurst=10
 
@@ -16,36 +16,42 @@ Type=simple
 User=veyrasense
 Group=veyrasense
 
-# Active release paths
+# Active release paths.
 WorkingDirectory=/opt/veyrasense/current/backend
 
-# Persistent production configuration
+# Persistent production configuration.
 EnvironmentFile=/etc/veyrasense/veyrasense.env
 
-# Run the FastAPI application using the active release virtual environment.
-# Start with one worker on Raspberry Pi 5; scale after measuring memory use.
+# Production Python settings.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Verify that the deployed Python environment exists.
 ExecStartPre=/usr/bin/test -x /opt/veyrasense/current/backend/.venv/bin/python
+
+# Run FastAPI using the active release virtual environment.
+# Keep one worker on Raspberry Pi 5.
 ExecStart=/opt/veyrasense/current/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 
-# Process reliability
+# Process reliability.
 Restart=on-failure
 RestartSec=5s
 TimeoutStartSec=60s
 TimeoutStopSec=30s
 KillMode=mixed
 
-# Filesystem permissions and sandboxing
+# Filesystem permissions and sandboxing.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+UMask=0027
 
-# Application write access is restricted to persistent state and logs.
+# Application write access.
 ReadWritePaths=/var/lib/veyrasense
 ReadWritePaths=/var/log/veyrasense
-ReadWritePaths=/run
 
-# Logging
+# Logging.
 StandardOutput=append:/var/log/veyrasense/backend.log
 StandardError=append:/var/log/veyrasense/backend.error.log
 

@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 # ==============================================================================
 # VeyraSense — Atomic Production Release Deployment
@@ -7,13 +8,14 @@
 # - One deployment lock, owned by pull-deploy.sh or this script
 # - Atomic release creation and symlink promotion
 # - Per-release Python virtual environment
-# - Correct frontend build and staging
+# - Frontend production build and staging
 # - SQLite backup before migration
 # - Application services stopped during migration
 # - Automatic rollback of release and database on failure
+# - Systemd validation after release promotion
 # - Health verification before accepting deployment
 # - Preserves active and previous releases
-# - Persistent application data remains outside release directories
+# - Persistent application data outside release directories
 #
 # Usage:
 #   sudo bash deploy.sh /path/to/staged/repository
@@ -22,9 +24,10 @@
 # ==============================================================================
 
 set -Eeuo pipefail
+umask 027
 
 # ------------------------------------------------------------------------------
-# Configuration
+# 1. Configuration
 # ------------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,7 +49,7 @@ UPDATE_TIMER="veyrasense-update.timer"
 SOURCE_ROOT="${1:-}"
 
 # ------------------------------------------------------------------------------
-# Root check
+# 2. Root check
 # ------------------------------------------------------------------------------
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -55,26 +58,26 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# Deployment lock
-#
-# pull-deploy.sh owns the lock when it launches this script.
-# Direct/manual invocations acquire it here.
+# 3. Deployment lock
 # ------------------------------------------------------------------------------
 
 LOCK_FILE="/run/lock/veyrasense-deploy.lock"
+
 mkdir -p "$(dirname "${LOCK_FILE}")"
 
 if [[ "${DEPLOY_LOCK_HELD:-0}" != "1" ]]; then
+
     exec 200>"${LOCK_FILE}"
 
     if ! flock -n 200; then
         echo "[ERROR] Another deployment or rollback is running." >&2
         exit 1
     fi
+
 fi
 
 # ------------------------------------------------------------------------------
-# Validate source
+# 4. Validate source
 # ------------------------------------------------------------------------------
 
 if [[ -z "${SOURCE_ROOT}" ]]; then
@@ -106,18 +109,32 @@ if [[ ! -d "${SOURCE_ROOT}/frontend" ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# Required commands
+# 5. Required commands
 # ------------------------------------------------------------------------------
 
-for cmd in python3 systemctl sqlite3 curl flock; do
+for cmd in \
+    python3 \
+    systemctl \
+    systemd-analyze \
+    sqlite3 \
+    curl \
+    flock \
+    git \
+    npm \
+    node \
+    chown \
+    readlink
+do
+
     if ! command -v "${cmd}" >/dev/null 2>&1; then
         echo "[ERROR] Required command not found: ${cmd}" >&2
         exit 1
     fi
+
 done
 
 # ------------------------------------------------------------------------------
-# Persistent directory preparation
+# 6. Persistent directory preparation
 # ------------------------------------------------------------------------------
 
 mkdir -p \
@@ -126,7 +143,7 @@ mkdir -p \
     "${BACKUPS_DIR}"
 
 # ------------------------------------------------------------------------------
-# Deployment state
+# 7. Deployment state
 # ------------------------------------------------------------------------------
 
 TIMESTAMP="$(date -u +"%Y%m%d_%H%M%S")"
@@ -148,17 +165,24 @@ DEPLOYMENT_SUCCEEDED=0
 ROLLBACK_IN_PROGRESS=0
 
 # ------------------------------------------------------------------------------
-# Record original release and service states
+# 8. Record original release and service states
 # ------------------------------------------------------------------------------
 
 if [[ -L "${CURRENT_LINK}" ]]; then
     PREVIOUS_RELEASE="$(readlink -f "${CURRENT_LINK}" || true)"
 fi
 
-systemctl is-active --quiet "${BACKEND_SERVICE}" && BACKEND_WAS_ACTIVE=1 || true
-systemctl is-active --quiet "${MQTT_SERVICE}" && MQTT_WAS_ACTIVE=1 || true
-systemctl is-active --quiet nginx && NGINX_WAS_ACTIVE=1 || true
-systemctl is-active --quiet "${UPDATE_TIMER}" && UPDATE_TIMER_WAS_ACTIVE=1 || true
+systemctl is-active --quiet "${BACKEND_SERVICE}" && \
+    BACKEND_WAS_ACTIVE=1 || true
+
+systemctl is-active --quiet "${MQTT_SERVICE}" && \
+    MQTT_WAS_ACTIVE=1 || true
+
+systemctl is-active --quiet nginx && \
+    NGINX_WAS_ACTIVE=1 || true
+
+systemctl is-active --quiet "${UPDATE_TIMER}" && \
+    UPDATE_TIMER_WAS_ACTIVE=1 || true
 
 if [[ -f "${DB_FILE}" ]]; then
     PREVIOUS_DB_EXISTED=1
@@ -172,7 +196,7 @@ echo " Previous release: ${PREVIOUS_RELEASE:-none}"
 echo "======================================================================"
 
 # ------------------------------------------------------------------------------
-# Rollback handler
+# 9. Rollback handler
 # ------------------------------------------------------------------------------
 
 rollback_deployment() {
@@ -213,21 +237,30 @@ rollback_deployment() {
                     mv -f "${RESTORE_TEMP}" "${DB_FILE}"
 
                     echo "[ROLLBACK] Database restored successfully."
+
                 else
+
                     rm -f "${RESTORE_TEMP}"
+
                     echo "[ROLLBACK-CRITICAL] Database backup restoration failed." >&2
+
                 fi
 
             else
+
                 echo "[ROLLBACK-CRITICAL] Pre-migration backup is missing." >&2
+
             fi
 
         else
+
             # The database did not exist before deployment.
-            # Remove a newly created database after stopping services.
             echo "[ROLLBACK] Removing database created by failed initial migration."
+
             rm -f "${DB_FILE}" "${DB_FILE}-wal" "${DB_FILE}-shm"
+
         fi
+
     fi
 
     # Restore previous release symlink.
@@ -243,62 +276,90 @@ rollback_deployment() {
             mv -Tf "${TEMP_LINK}" "${CURRENT_LINK}"; then
 
             echo "[ROLLBACK] Previous release restored."
+
         else
+
             echo "[ROLLBACK-CRITICAL] Failed to restore previous release symlink." >&2
+
         fi
 
     elif [[ "${RELEASE_PROMOTED}" -eq 1 ]]; then
 
         echo "[ROLLBACK-WARN] No previous release was available." >&2
+
         rm -f "${CURRENT_LINK}"
+
     fi
 
-    # Restore service running states.
+    # Restore original service running states.
     if [[ "${BACKEND_WAS_ACTIVE}" -eq 1 ]]; then
+
         systemctl start "${BACKEND_SERVICE}" || \
             echo "[ROLLBACK-ERROR] Backend failed to restart." >&2
+
     fi
 
     if [[ "${MQTT_WAS_ACTIVE}" -eq 1 ]]; then
+
         systemctl start "${MQTT_SERVICE}" || \
             echo "[ROLLBACK-ERROR] MQTT worker failed to restart." >&2
+
     fi
 
     if [[ "${NGINX_WAS_ACTIVE}" -eq 1 ]]; then
+
         systemctl reload nginx || \
             echo "[ROLLBACK-WARN] Nginx reload failed." >&2
+
     fi
 
     if [[ "${UPDATE_TIMER_WAS_ACTIVE}" -eq 1 ]]; then
+
         systemctl start "${UPDATE_TIMER}" || true
+
     else
+
         systemctl stop "${UPDATE_TIMER}" >/dev/null 2>&1 || true
+
     fi
 
     # Remove failed release only after restoring the old release.
     if [[ -d "${TARGET_RELEASE_DIR}" &&
           "${TARGET_RELEASE_DIR}" != "${PREVIOUS_RELEASE}" ]]; then
+
         rm -rf -- "${TARGET_RELEASE_DIR}"
+
     fi
 
     echo "[ROLLBACK] Recovery procedure finished." >&2
 }
 
-on_error() {
-    local exit_code=$?
-    trap - ERR
+# ------------------------------------------------------------------------------
+# 10. EXIT handler
+#
+# Unlike an ERR-only trap, EXIT also handles explicit exit 1 statements.
+# -----------------------------------------------------------------------------
 
-    if [[ "${DEPLOYMENT_SUCCEEDED}" -ne 1 ]]; then
+on_exit() {
+
+    local exit_code=$?
+
+    trap - EXIT
+
+    if [[ "${exit_code}" -ne 0 &&
+          "${DEPLOYMENT_SUCCEEDED}" -ne 1 ]]; then
+
         rollback_deployment
+
     fi
 
     exit "${exit_code}"
 }
 
-trap on_error ERR
+trap on_exit EXIT
 
 # ------------------------------------------------------------------------------
-# 1. Create release staging directory
+# 11. Create release staging directory
 # ------------------------------------------------------------------------------
 
 echo "[1/9] Preparing release directory."
@@ -336,10 +397,16 @@ elif [[ -f "${SOURCE_ROOT}/backend/.git_commit" ]]; then
     cp -f \
         "${SOURCE_ROOT}/backend/.git_commit" \
         "${TARGET_RELEASE_DIR}/backend/.git_commit"
+
+else
+
+    echo "[ERROR] Unable to determine source Git commit." >&2
+    exit 1
+
 fi
 
 # ------------------------------------------------------------------------------
-# 2. Create Python virtual environment
+# 12. Create Python virtual environment
 # ------------------------------------------------------------------------------
 
 echo "[2/9] Building Python environment."
@@ -354,7 +421,7 @@ python3 -m venv "${TARGET_RELEASE_DIR}/backend/.venv"
     -r "${TARGET_RELEASE_DIR}/backend/requirements.txt"
 
 # ------------------------------------------------------------------------------
-# 3. Build or verify frontend
+# 13. Build or verify frontend
 # ------------------------------------------------------------------------------
 
 echo "[3/9] Building frontend."
@@ -370,11 +437,6 @@ else
         exit 1
     fi
 
-    if ! command -v npm >/dev/null 2>&1; then
-        echo "[ERROR] npm is required because frontend/dist is missing." >&2
-        exit 1
-    fi
-
     if [[ ! -f "${TARGET_RELEASE_DIR}/frontend/package-lock.json" ]]; then
         echo "[ERROR] package-lock.json is required for reproducible npm ci." >&2
         exit 1
@@ -382,7 +444,9 @@ else
 
     (
         cd "${TARGET_RELEASE_DIR}/frontend"
+
         npm ci
+
         npm run build
     )
 
@@ -394,7 +458,7 @@ if [[ ! -f "${TARGET_RELEASE_DIR}/frontend/dist/index.html" ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 4. Stop application services before database backup and migration
+# 14. Stop application services before database backup and migration
 # ------------------------------------------------------------------------------
 
 echo "[4/9] Stopping application services."
@@ -403,7 +467,7 @@ systemctl stop "${MQTT_SERVICE}"
 systemctl stop "${BACKEND_SERVICE}"
 
 # ------------------------------------------------------------------------------
-# 5. Mandatory database backup
+# 15. Mandatory database backup
 # ------------------------------------------------------------------------------
 
 echo "[5/9] Creating pre-migration SQLite backup."
@@ -444,7 +508,7 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 6. Apply database migrations
+# 16. Apply database migrations
 # ------------------------------------------------------------------------------
 
 echo "[6/9] Applying Alembic migrations."
@@ -456,10 +520,14 @@ MIGRATION_STARTED=1
 
     # Load production environment variables for Alembic.
     if [[ -f "${ENV_FILE}" ]]; then
+
         set -a
+
         # shellcheck source=/dev/null
         source "${ENV_FILE}"
+
         set +a
+
     fi
 
     "${TARGET_RELEASE_DIR}/backend/.venv/bin/alembic" upgrade head
@@ -468,7 +536,7 @@ MIGRATION_STARTED=1
 echo "[INFO] Database migrations completed."
 
 # ------------------------------------------------------------------------------
-# 7. Promote new release atomically
+# 17. Promote new release atomically
 # ------------------------------------------------------------------------------
 
 echo "[7/9] Promoting release."
@@ -480,6 +548,7 @@ TEMP_LINK="${BASE_INSTALL_DIR}/current.next.$$"
 rm -f "${TEMP_LINK}"
 
 ln -s "${TARGET_RELEASE_DIR}" "${TEMP_LINK}"
+
 mv -Tf "${TEMP_LINK}" "${CURRENT_LINK}"
 
 RELEASE_PROMOTED=1
@@ -490,12 +559,30 @@ if [[ "$(readlink -f "${CURRENT_LINK}")" != "${TARGET_RELEASE_DIR}" ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 8. Start services and perform health verification
+# 18. Validate systemd units after release promotion
+#
+# The /opt/veyrasense/current paths now resolve to the new release.
+# This is the correct point to validate ExecStartPre and ExecStart paths.
+# ------------------------------------------------------------------------------
+
+echo "[INFO] Validating VeyraSense systemd units."
+
+systemd-analyze verify \
+    "/etc/systemd/system/${BACKEND_SERVICE}" \
+    "/etc/systemd/system/${MQTT_SERVICE}"
+
+echo "[INFO] Systemd unit validation passed."
+
+# ------------------------------------------------------------------------------
+# 19. Start services and perform health verification
 # ------------------------------------------------------------------------------
 
 echo "[8/9] Starting application services."
 
+systemctl daemon-reload
+
 systemctl start "${BACKEND_SERVICE}"
+
 systemctl start "${MQTT_SERVICE}"
 
 if ! systemctl is-active --quiet "${BACKEND_SERVICE}"; then
@@ -522,20 +609,22 @@ fi
 bash "${HEALTH_SCRIPT}"
 
 # ------------------------------------------------------------------------------
-# 9. Enable services and retain previous releases
+# 20. Enable services and retain previous releases
 # ------------------------------------------------------------------------------
 
 echo "[9/9] Finalizing deployment."
 
 systemctl enable "${BACKEND_SERVICE}"
+
 systemctl enable "${MQTT_SERVICE}"
 
-# Enable timer only after successful deployment.
+# Enable timer only after successful health verification.
 systemctl enable "${UPDATE_TIMER}"
+
 systemctl start "${UPDATE_TIMER}"
 
 # ------------------------------------------------------------------------------
-# Retain active and previous release
+# 21. Retain active and previous releases
 # ------------------------------------------------------------------------------
 
 echo "[INFO] Pruning obsolete releases."
@@ -566,17 +655,22 @@ for RELEASE in "${ALL_RELEASES[@]}"; do
 
     # Keep one additional recent release besides active and previous.
     if [[ "${KEPT}" -gt 1 ]]; then
+
         echo "[INFO] Removing obsolete release: ${RELEASE}"
+
         rm -rf -- "${RELEASE}"
+
     fi
+
 done
 
 # ------------------------------------------------------------------------------
-# Success
+# 22. Success
 # ------------------------------------------------------------------------------
 
 DEPLOYMENT_SUCCEEDED=1
-trap - ERR
+
+trap - EXIT
 
 echo ""
 echo "======================================================================"

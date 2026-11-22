@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 # ==============================================================================
 # VeyraSense — Debian 13 / Raspberry Pi 5 Prerequisite Installer
@@ -7,7 +8,8 @@
 #
 # Behavior:
 # - Validates source files before modifying the system.
-# - Validates shell scripts and systemd units.
+# - Validates shell scripts before installation.
+# - Defers executable-dependent systemd verification until deployment.
 # - Preserves an existing production environment file.
 # - Preserves the Nginx default site.
 # - Backs up an existing VeyraSense Nginx configuration.
@@ -89,16 +91,16 @@ log "Validating repository source files."
 
 for file in "${MAINTENANCE_SCRIPTS[@]}"; do
     [[ -f "${SCRIPT_DIR}/${file}" ]] ||
-        die "Missing maintenance script: ${SCRIPT_DIR}/${file}"
+        die "Missing maintenance script: ${file}"
 done
 
 for file in "${SYSTEMD_UNITS[@]}"; do
     [[ -f "${SYSTEMD_SRC_DIR}/${file}" ]] ||
-        die "Missing systemd unit: ${SYSTEMD_SRC_DIR}/${file}"
+        die "Missing systemd unit: ${file}"
 done
 
 # ------------------------------------------------------------------------------
-# 3. Validate shell scripts and systemd units
+# 3. Validate shell scripts and check systemd tooling
 # ------------------------------------------------------------------------------
 
 log "Checking shell script syntax."
@@ -108,16 +110,21 @@ for file in "${MAINTENANCE_SCRIPTS[@]}"; do
         die "Shell syntax validation failed: ${file}"
 done
 
-log "Checking systemd unit syntax."
+log "Checking systemd validation tooling."
 
 if ! command -v systemd-analyze >/dev/null 2>&1; then
     die "systemd-analyze is unavailable."
 fi
 
-for file in "${SYSTEMD_UNITS[@]}"; do
-    systemd-analyze verify "${SYSTEMD_SRC_DIR}/${file}" ||
-        die "Systemd unit validation failed: ${file}"
-done
+# Full systemd unit verification is deferred until the first release
+# has been deployed because application executable paths do not exist
+# during prerequisite installation.
+#
+# Runtime ExecStartPre checks remain in the service unit files.
+# They will verify the actual application virtual environment when
+# systemd starts the application services.
+
+log "Systemd unit verification deferred until application deployment."
 
 # ------------------------------------------------------------------------------
 # 4. Validate existing Nginx VeyraSense entry
@@ -407,7 +414,7 @@ echo "   VeyraSense site installed and validated."
 echo "   Existing default site was not removed."
 echo ""
 echo " Mosquitto:"
-echo "   Dedicated VeyraSense broker configuration installed."
+echo "   Existing broker configuration left unchanged."
 echo ""
 echo " Application services:"
 echo "   Backend:     stopped"
@@ -416,9 +423,9 @@ echo "   Update:      stopped"
 echo "   Timer:       stopped"
 echo ""
 echo " Next:"
-echo "   Configure production environment values."
-echo "   Verify GitHub deployment key and API token configuration."
+echo "   Verify production environment values."
 echo "   Deploy VeyraSense before enabling its services."
+echo "   Verify application service executables after deployment."
 echo "======================================================================"
 
 exit 0
