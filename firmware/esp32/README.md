@@ -4,7 +4,7 @@
 This directory contains production-grade, reusable C++ firmware for ESP32 microcontrollers communicating with the VeyraSense Raspberry Pi 5 Gateway.
 
 ### Key Capabilities
-- **Per-Node Authentication:** Unique MQTT credentials and device secrets generated dynamically via the VeyraSense dashboard.
+- **Per-Node Authentication:** Each node uses its Mosquitto MQTT username and password.
 - **Strict Broker ACL Enforcement:** Each node is granted access strictly to its own topics (`veyrasense/nodes/{node_id}/telemetry` and `veyrasense/nodes/{node_id}/status`).
 - **Last Will and Testament (LWT):** Automatic detection of power failure or abrupt network disconnection.
 - **Idempotency & Sequence Numbering:** Monotonically increasing sequence counters allow the gateway backend to eliminate retransmission duplicates.
@@ -39,12 +39,12 @@ Install the following via the Arduino Library Manager:
 ### Flashing Steps
 1. In the VeyraSense Dashboard, navigate to **Devices** and click **"Register & Provision Node"**.
 2. Select your Department, enter the location, select **DHT11** and **MQ-135**, and click **"Generate Credentials & Provision"**.
-3. Copy the generated `config.h` header snippet displayed in the one-time secret modal.
-4. In `firmware/esp32/include/`, create `config.h` and paste the snippet:
+3. In `firmware/esp32/include/`, create a local `config.h` from the placeholder example:
    ```bash
    cp firmware/esp32/include/config.h.example firmware/esp32/include/config.h
-   # Edit with your Wi-Fi SSID, Password, and Gateway IP
+   # Set Wi-Fi name/password, Raspberry Pi broker address, and the node's MQTT username/password.
    ```
+   For NODE-01, use username `NODE-01` and its MQTT password. For NODE-02, set `VEYRASENSE_NODE_ID` and `MQTT_USERNAME` to `NODE-02`, then use its own MQTT password. Keep the existing sensor pin settings unchanged. The ESP32 needs no API key or other application secret.
 5. Connect your ESP32 board via USB.
 6. Compile and upload at `115200` baud.
 7. Open the Serial Monitor to verify connection:
@@ -60,4 +60,4 @@ Install the following via the Arduino Library Manager:
 
 ## 3. Security Requirements
 > [!IMPORTANT]
-> **Never commit `config.h` to version control.** The `.gitignore` file is pre-configured to ignore `firmware/**/config.h`. Always use the dashboard to provision unique, individual credentials for each deployed physical node.
+> **Never commit `config.h` to version control.** The `.gitignore` file already ignores `firmware/**/config.h`. Example files contain placeholders only. Configure each node with its own MQTT username and password; do not put live credentials in source, documentation, or Serial Monitor output.
