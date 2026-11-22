@@ -108,6 +108,7 @@ fi
 
 TARGET_COMMIT=$(git rev-parse "origin/${BRANCH}")
 LOCAL_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
+echo "[PULL-DEPLOY] Staged cache current commit: ${LOCAL_COMMIT:0:10}"
 
 # 4. Duplicate Deployment Prevention (Never re-deploy the same commit)
 ACTIVE_DEPLOYED_COMMIT=""

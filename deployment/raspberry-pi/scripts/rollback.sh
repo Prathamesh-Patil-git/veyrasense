@@ -45,8 +45,9 @@ if [[ -z "${TARGET_ROLLBACK_DIR}" ]]; then
     fi
 
     # Find the latest release that is NOT the currently linked one
-    for rel in $(ls -1dt "${RELEASES_DIR}"/release_* 2>/dev/null); do
-        if [[ "${rel}" != "${CURRENT_TARGET}" ]]; then
+    readarray -t CANDIDATE_RELEASES < <(ls -1dt "${RELEASES_DIR}"/release_* 2>/dev/null || true)
+    for rel in "${CANDIDATE_RELEASES[@]}"; do
+        if [[ -n "${rel}" && "${rel}" != "${CURRENT_TARGET}" ]]; then
             TARGET_ROLLBACK_DIR="${rel}"
             break
         fi

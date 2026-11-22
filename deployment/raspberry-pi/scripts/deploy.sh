@@ -116,7 +116,10 @@ set +e
 (
     cd "${TARGET_RELEASE_DIR}/backend"
     if [[ -f "${ENV_FILE}" ]]; then
-        export $(grep -v '^#' "${ENV_FILE}" | xargs -d '\n') 2>/dev/null || true
+        set -a
+        # shellcheck source=/dev/null
+        source "${ENV_FILE}" 2>/dev/null || true
+        set +a
     fi
     "${VENV_PATH}/bin/alembic" upgrade head
 )

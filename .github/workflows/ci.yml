@@ -47,7 +47,10 @@ jobs:
 
       - name: Verify Alembic Migrations Consistency
         run: |
-          python -m alembic check || python -m alembic upgrade head
+          mkdir -p data
+          rm -f data/veyrasense.db*
+          python -m alembic upgrade head
+          python -m alembic check
 
   # ============================================================================
   # 2. Frontend Strict Compilation & Production Bundle Build
@@ -72,7 +75,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Node.js dependencies
-        run: npm ci
+        run: npm install
 
       - name: Compile TypeScript & Build Production Bundle
         run: npm run build
