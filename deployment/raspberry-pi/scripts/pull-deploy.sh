@@ -193,8 +193,14 @@ echo "======================================================================"
 # Prepare staging directory
 # ------------------------------------------------------------------------------
 
+# The backend runs as veyrasense and Mosquitto needs to traverse this
+# directory to reach its configuration under /var/lib/veyrasense/mosquitto.
+# Keep the parent owned by root:veyrasense with execute-only access for others.
+install -d -o root -g veyrasense -m 0751 \
+    /var/lib/veyrasense
+
+# Keep the Git staging cache private to root.
 install -d -o root -g root -m 0750 \
-    /var/lib/veyrasense \
     "${CLONE_STAGE_DIR}"
 
 # ------------------------------------------------------------------------------
