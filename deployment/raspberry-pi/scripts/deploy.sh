@@ -549,7 +549,18 @@ echo "[INFO] Database migrations completed."
 
 echo "[7/9] Promoting release."
 
-chown -R veyrasense:veyrasense "${TARGET_RELEASE_DIR}"
+# Keep application code owned by the backend service account, while
+# allowing Nginx to traverse the release path and read only the public
+# frontend production build.
+chown veyrasense:www-data "${TARGET_RELEASE_DIR}"
+chmod 0750 "${TARGET_RELEASE_DIR}"
+
+chown veyrasense:www-data "${TARGET_RELEASE_DIR}/frontend"
+chmod 0750 "${TARGET_RELEASE_DIR}/frontend"
+
+chown -R veyrasense:www-data "${TARGET_RELEASE_DIR}/frontend/dist"
+find "${TARGET_RELEASE_DIR}/frontend/dist" -type d -exec chmod 0750 {} +
+find "${TARGET_RELEASE_DIR}/frontend/dist" -type f -exec chmod 0640 {} +
 
 TEMP_LINK="${BASE_INSTALL_DIR}/current.next.$$"
 
