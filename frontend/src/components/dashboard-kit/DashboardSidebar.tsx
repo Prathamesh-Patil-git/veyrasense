@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import { VeyraLogo } from '../common/VeyraLogo';
+import { api } from '../../services/api';
 
 interface NavItem {
   to: string;
@@ -48,6 +49,29 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
   onCloseMobileDrawer,
 }) => {
   const location = useLocation();
+  const [liveCounts, setLiveCounts] = useState<{ nodes: number | null; alerts: number | null }>({
+    nodes: null,
+    alerts: null,
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    api.getDashboardOverview()
+      .then((data) => {
+        if (mounted) {
+          setLiveCounts({
+            nodes: data.registered_nodes,
+            alerts: data.active_investigations,
+          });
+        }
+      })
+      .catch(() => {
+        // fail gracefully without mock numbers
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [location.pathname]);
 
   const navGroups: NavGroup[] = [
     {
@@ -55,14 +79,25 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
       items: [
         { to: '/app/overview', label: 'Overview', icon: LayoutDashboard },
         { to: '/app/departments', label: 'Departments', icon: Building2 },
-        { to: '/app/monitoring', label: 'Sensor Monitoring', icon: Activity, badge: '16' },
+        {
+          to: '/app/monitoring',
+          label: 'Sensor Monitoring',
+          icon: Activity,
+          badge: liveCounts.nodes !== null && liveCounts.nodes > 0 ? String(liveCounts.nodes) : undefined,
+        },
         { to: '/app/map', label: 'Sensor Network Map', icon: Network },
       ],
     },
     {
       title: 'Diagnostics & Recovery',
       items: [
-        { to: '/app/investigations', label: 'Alerts & Investigations', icon: AlertTriangle, badge: '2', badgeAlert: true },
+        {
+          to: '/app/investigations',
+          label: 'Alerts & Investigations',
+          icon: AlertTriangle,
+          badge: liveCounts.alerts !== null && liveCounts.alerts > 0 ? String(liveCounts.alerts) : undefined,
+          badgeAlert: true,
+        },
         { to: '/app/devices', label: 'Device Management', icon: Cpu },
         { to: '/app/data-explorer', label: 'Data Explorer', icon: Database },
         { to: '/app/challenges', label: 'Physical Challenges', icon: Zap },

@@ -24,6 +24,30 @@ async def lifespan(app: FastAPI):
     settings.resolved_data_dir
     Base.metadata.create_all(bind=engine)
     logger.info(f"SQLite database ready at: {settings.resolved_database_url}")
+    # Auto-seed standard industrial departments if none exist
+    try:
+        from app.database.connection import SessionLocal
+        from app.database.models.department import Department
+        from sqlalchemy import select, func
+        with SessionLocal() as db:
+            count = db.scalar(select(func.count(Department.id))) or 0
+            if count == 0:
+                logger.info("Initializing core industrial departments in database...")
+                core_depts = [
+                    ("Production", "Continuous chemical synthesis, assembly lines, and reactor vessel monitoring"),
+                    ("Quality Control", "Precision dimension, purity, acoustic ringdown, and tolerance verification"),
+                    ("Maintenance", "Predictive machinery vibration, pump wear, and bearing degradation analysis"),
+                    ("Utilities", "Hydraulic drainage networks, cooling towers, power distribution, and manholes"),
+                    ("Storage & Warehouse", "Ambient environmental climate, cold chain storage, and sealed vessel integrity"),
+                    ("Environmental Monitoring", "Toxic gas emission detection, stormwater runoff, and ambient atmospheric quality"),
+                    ("Research & Development", "Experimental AIoT sensor challenge-response validation testbed"),
+                ]
+                for name, desc in core_depts:
+                    db.add(Department(name=name, description=desc, is_active=True))
+                db.commit()
+                logger.info("7 core industrial departments initialized successfully.")
+    except Exception as e:
+        logger.warning(f"Could not initialize core departments at startup: {e}")
     # Sync initial Mosquitto configuration and per-node ACLs
     try:
         from app.database.connection import SessionLocal

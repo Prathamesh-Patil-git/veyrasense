@@ -16,7 +16,23 @@ class DepartmentService:
         stmt = select(Department)
         if active_only:
             stmt = stmt.where(Department.is_active.is_(True))
-        departments = db.scalars(stmt.order_id if hasattr(stmt, "order_id") else stmt).all()
+        departments = db.scalars(stmt).all()
+
+        # If database has no departments, bootstrap standard industrial departments
+        if len(departments) == 0:
+            core_depts = [
+                ("Production", "Continuous chemical synthesis, assembly lines, and reactor vessel monitoring"),
+                ("Quality Control", "Precision dimension, purity, acoustic ringdown, and tolerance verification"),
+                ("Maintenance", "Predictive machinery vibration, pump wear, and bearing degradation analysis"),
+                ("Utilities", "Hydraulic drainage networks, cooling towers, power distribution, and manholes"),
+                ("Storage & Warehouse", "Ambient environmental climate, cold chain storage, and sealed vessel integrity"),
+                ("Environmental Monitoring", "Toxic gas emission detection, stormwater runoff, and ambient atmospheric quality"),
+                ("Research & Development", "Experimental AIoT sensor challenge-response validation testbed"),
+            ]
+            for name, desc in core_depts:
+                db.add(Department(name=name, description=desc, is_active=True))
+            db.commit()
+            departments = db.scalars(stmt).all()
 
         results: List[DepartmentWithCountResponse] = []
         for dept in departments:

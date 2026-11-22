@@ -20,8 +20,8 @@ export const DashboardBanner: React.FC<DashboardBannerProps> = ({
   actionLabel = 'View Sensor Network',
   actionHref = '/app/monitoring',
   onActionClick,
-  nodeCount = 16,
-  healthPercent = 99.4,
+  nodeCount = 0,
+  healthPercent = 100.0,
   departmentName = 'All Departments',
 }) => {
   const now = new Date();

@@ -28,9 +28,21 @@ function generateCandidateNodeId(prefix: string = 'ESP32'): string {
   return `NODE-${clean}-${hex}`;
 }
 
+const nowIso = new Date().toISOString();
+
+const DEFAULT_CORE_DEPARTMENTS: ApiDepartment[] = [
+  { id: 1, name: 'Production', description: 'Continuous chemical synthesis and assembly', is_active: true, node_count: 0, online_count: 0, health_percentage: 100, created_at: nowIso, updated_at: nowIso },
+  { id: 2, name: 'Quality Control', description: 'Precision dimension and test benches', is_active: true, node_count: 0, online_count: 0, health_percentage: 100, created_at: nowIso, updated_at: nowIso },
+  { id: 3, name: 'Maintenance', description: 'Machinery vibration and bearings', is_active: true, node_count: 0, online_count: 0, health_percentage: 100, created_at: nowIso, updated_at: nowIso },
+  { id: 4, name: 'Utilities', description: 'Hydraulic drainage and chillers', is_active: true, node_count: 0, online_count: 0, health_percentage: 100, created_at: nowIso, updated_at: nowIso },
+  { id: 5, name: 'Storage & Warehouse', description: 'Climate storage and bay humidity', is_active: true, node_count: 0, online_count: 0, health_percentage: 100, created_at: nowIso, updated_at: nowIso },
+  { id: 6, name: 'Environmental Monitoring', description: 'Emissions and toxic gas detection', is_active: true, node_count: 0, online_count: 0, health_percentage: 100, created_at: nowIso, updated_at: nowIso },
+  { id: 7, name: 'Research & Development', description: 'Experimental AIoT sensor testbed', is_active: true, node_count: 0, online_count: 0, health_percentage: 100, created_at: nowIso, updated_at: nowIso },
+];
+
 export const DevicesPage: React.FC = () => {
   const [nodes, setNodes] = useState<ApiNode[]>([]);
-  const [departments, setDepartments] = useState<ApiDepartment[]>([]);
+  const [departments, setDepartments] = useState<ApiDepartment[]>(DEFAULT_CORE_DEPARTMENTS);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,16 +74,18 @@ export const DevicesPage: React.FC = () => {
         api.getDepartments(),
       ]);
       setNodes(nodesData);
-      setDepartments(deptsData);
-      if (deptsData.length > 0 && !formDeptId) {
-        setFormDeptId(deptsData[0].id);
-      }
+      const effectiveDepts = deptsData.length > 0 ? deptsData : DEFAULT_CORE_DEPARTMENTS;
+      setDepartments(effectiveDepts);
+      setFormDeptId((current) => {
+        const exists = effectiveDepts.some((d) => d.id === current);
+        return exists ? current : effectiveDepts[0].id;
+      });
     } catch (err: any) {
       setError(err.message || 'Failed to communicate with gateway backend.');
     } finally {
       setLoading(false);
     }
-  }, [formDeptId]);
+  }, []);
 
   useEffect(() => {
     fetchNodesAndDepts();
