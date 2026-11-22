@@ -10,6 +10,9 @@ import {
   AlertTriangle,
   FileCode,
   History,
+  Pencil,
+  Trash2,
+  RotateCcw,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import type {
@@ -64,6 +67,16 @@ export const DevicesPage: React.FC = () => {
   const [sensorMQ135, setSensorMQ135] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [editingNode, setEditingNode] = useState<ApiNode | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    department_id: 1,
+    hardware_type: '',
+    firmware_version: '',
+    location: '',
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [showRemoved, setShowRemoved] = useState(false);
 
   const fetchNodesAndDepts = useCallback(async () => {
     try {
@@ -153,15 +166,57 @@ export const DevicesPage: React.FC = () => {
   };
 
   const handleRevokeNode = async (nodeId: string) => {
-    if (!window.confirm(`CRITICAL: Revoke node ${nodeId}? This cuts off all MQTT and API access immediately. Historical telemetry data remains safely preserved.`)) {
+    if (!window.confirm(`Remove ${nodeId} from the active fleet? Its MQTT access will be revoked. Historical telemetry will be preserved.`)) {
       return;
     }
     try {
       await api.revokeNode(nodeId);
-      alert(`Node ${nodeId} has been revoked.`);
-      fetchNodesAndDepts();
+      setNodes((current) => current.map((node) => node.node_id === nodeId
+        ? { ...node, is_active: false, status: 'offline', provisioning_status: 'revoked' }
+        : node));
     } catch (err: any) {
-      alert(`Revocation failed: ${err.message}`);
+      alert(`Remove failed: ${err.message}`);
+    }
+  };
+
+  const handleEditNode = (node: ApiNode) => {
+    setEditingNode(node);
+    setEditForm({
+      name: node.name,
+      department_id: node.department_id,
+      hardware_type: node.hardware_type,
+      firmware_version: node.firmware_version,
+      location: node.location || '',
+    });
+  };
+
+  const handleEditSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingNode) return;
+    try {
+      setSavingEdit(true);
+      const updated = await api.updateNode(editingNode.node_id, {
+        name: editForm.name.trim(),
+        department_id: Number(editForm.department_id),
+        hardware_type: editForm.hardware_type.trim(),
+        firmware_version: editForm.firmware_version.trim(),
+        location: editForm.location.trim() || null,
+      });
+      setNodes((current) => current.map((node) => node.node_id === updated.node_id ? updated : node));
+      setEditingNode(null);
+    } catch (err: any) {
+      alert(`Update failed: ${err.message}`);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleRestoreNode = async (nodeId: string) => {
+    try {
+      const restored = await api.activateNode(nodeId);
+      setNodes((current) => current.map((node) => node.node_id === restored.node_id ? restored : node));
+    } catch (err: any) {
+      alert(`Could not restore ${nodeId}: ${err.message}`);
     }
   };
 
@@ -205,6 +260,9 @@ export const DevicesPage: React.FC = () => {
         );
     }
   };
+
+  const removedCount = nodes.filter((node) => node.provisioning_status === 'revoked' || !node.is_active).length;
+  const visibleNodes = nodes.filter((node) => showRemoved || (node.is_active && node.provisioning_status !== 'revoked'));
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-200">
@@ -288,8 +346,19 @@ export const DevicesPage: React.FC = () => {
       </div>
 
       {/* Node Cards Fleet Grid */}
+      {removedCount > 0 && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setShowRemoved((value) => !value)}
+            className="text-xs font-semibold text-[#134685] hover:underline"
+          >
+            {showRemoved ? 'Hide' : 'Show'} removed devices ({removedCount})
+          </button>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {nodes.map((node) => {
+        {visibleNodes.map((node) => {
           const isRevoked = node.provisioning_status === 'revoked' || !node.is_active;
           return (
             <div
@@ -342,7 +411,15 @@ export const DevicesPage: React.FC = () => {
               </div>
 
               {/* Node Card Actions */}
-              <div className="pt-3 border-t border-[#F2F3EE] flex items-center justify-between gap-2 mt-4 text-xs">
+              <div className="pt-3 border-t border-[#F2F3EE] flex flex-wrap items-center justify-between gap-2 mt-4 text-xs">
+                <button
+                  onClick={() => handleEditNode(node)}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-[#134685] hover:text-[#0B356B]"
+                  title="Edit device information"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Edit</span>
+                </button>
                 <button
                   onClick={() => handleViewAudit(node.node_id)}
                   className="flex items-center gap-1 text-[11px] font-semibold text-[#718096] hover:text-[#172238]"
@@ -364,19 +441,60 @@ export const DevicesPage: React.FC = () => {
                     <button
                       onClick={() => handleRevokeNode(node.node_id)}
                       className="px-2.5 py-1 rounded-xl text-[11px] font-semibold text-[#A82824] bg-[#FDF0F0] hover:bg-[#FCE2E2] transition-colors"
-                      title="Revoke Node Access"
+                      title="Remove from active fleet"
                     >
-                      Revoke
+                      <span className="inline-flex items-center gap-1"><Trash2 className="w-3 h-3" />Remove</span>
                     </button>
                   </div>
                 ) : (
-                  <span className="text-[11px] font-bold text-[#A82824] italic">Access Terminated</span>
+                  <button
+                    onClick={() => handleRestoreNode(node.node_id)}
+                    className="px-2.5 py-1 rounded-xl text-[11px] font-semibold text-[#0C5A37] bg-[#E8FAF1] hover:bg-[#D9F4E5] transition-colors"
+                    title="Restore this device"
+                  >
+                    <span className="inline-flex items-center gap-1"><RotateCcw className="w-3 h-3" />Restore</span>
+                  </button>
                 )}
               </div>
             </div>
           );
         })}
       </div>
+
+      {editingNode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#172238]/60 backdrop-blur-xs">
+          <form onSubmit={handleEditSubmit} className="clay-surface max-w-lg w-full p-6 sm:p-8 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="pb-3 border-b border-[#F2F3EE]">
+              <h3 className="text-xl font-black text-[#172238]">Edit Device Information</h3>
+              <p className="text-xs text-[#718096] mt-1">Node ID and MQTT topics stay unchanged.</p>
+              <div className="font-mono text-xs text-[#134685] mt-2">{editingNode.node_id}</div>
+            </div>
+
+            <label className="block text-xs font-bold text-[#172238]">Device name
+              <input required minLength={2} maxLength={128} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="mt-1.5 w-full clay-recessed text-sm px-4 py-2.5 rounded-xl" />
+            </label>
+            <label className="block text-xs font-bold text-[#172238]">Department
+              <select value={editForm.department_id} onChange={(e) => setEditForm({ ...editForm, department_id: Number(e.target.value) })} className="mt-1.5 w-full clay-recessed text-sm px-4 py-2.5 rounded-xl">
+                {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+              </select>
+            </label>
+            <label className="block text-xs font-bold text-[#172238]">Hardware type
+              <input required minLength={2} maxLength={64} value={editForm.hardware_type} onChange={(e) => setEditForm({ ...editForm, hardware_type: e.target.value })} className="mt-1.5 w-full clay-recessed text-sm px-4 py-2.5 rounded-xl" />
+            </label>
+            <label className="block text-xs font-bold text-[#172238]">Firmware version
+              <input maxLength={32} value={editForm.firmware_version} onChange={(e) => setEditForm({ ...editForm, firmware_version: e.target.value })} className="mt-1.5 w-full clay-recessed text-sm px-4 py-2.5 rounded-xl" />
+            </label>
+            <label className="block text-xs font-bold text-[#172238]">Location
+              <input maxLength={255} value={editForm.location} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="mt-1.5 w-full clay-recessed text-sm px-4 py-2.5 rounded-xl" />
+            </label>
+
+            <div className="pt-2 border-t border-[#F2F3EE] flex justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setEditingNode(null)}>Cancel</Button>
+              <Button type="submit" variant="primary" size="sm" isLoading={savingEdit} className="clay-btn-primary">Save Changes</Button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* =====================================================================
           1. PROVISION NODE MODAL

@@ -72,6 +72,46 @@ class NodeService:
         return db.scalar(stmt)
 
     @staticmethod
+    def update_node(
+        db: Session,
+        node_id: str,
+        data: NodeUpdate,
+        actor: str = "admin",
+        ip_address: Optional[str] = None,
+    ) -> SensorNode:
+        """Update editable device information without changing its MQTT identity."""
+        node = NodeService.get_node_by_node_id(db, node_id)
+        if not node:
+            raise ValueError(f"Sensor node '{node_id}' does not exist.")
+
+        changes = data.model_dump(exclude_unset=True)
+        if not changes:
+            raise ValueError("At least one device information field must be provided.")
+
+        if "department_id" in changes:
+            if changes["department_id"] is None:
+                raise ValueError("Department ID cannot be empty.")
+            if not db.get(Department, changes["department_id"]):
+                raise ValueError(f"Department ID {changes['department_id']} does not exist.")
+
+        for field, value in changes.items():
+            if field != "location" and value is None:
+                raise ValueError(f"{field.replace('_', ' ').capitalize()} cannot be empty.")
+            setattr(node, field, value)
+        db.commit()
+        db.refresh(node)
+
+        AuditService.log_action(
+            db=db,
+            action="node_updated",
+            entity_id=node_id,
+            actor=actor,
+            details=json.dumps({"updated_fields": sorted(changes)}),
+            ip_address=ip_address,
+        )
+        return node
+
+    @staticmethod
     def create_node(db: Session, data: NodeCreate) -> SensorNode:
         # Check duplicate node_id
         existing = NodeService.get_node_by_node_id(db, data.node_id)

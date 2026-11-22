@@ -20,12 +20,10 @@ class NodeCreate(NodeBase):
 
 class NodeUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=128)
-    department_id: Optional[int] = None
-    hardware_type: Optional[str] = None
-    firmware_version: Optional[str] = None
+    department_id: Optional[int] = Field(None, gt=0)
+    hardware_type: Optional[str] = Field(None, min_length=2, max_length=64)
+    firmware_version: Optional[str] = Field(None, max_length=32)
     location: Optional[str] = None
-    status: Optional[str] = None
-    is_active: Optional[bool] = None
 
 
 class NodeResponse(NodeBase):

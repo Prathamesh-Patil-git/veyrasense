@@ -52,6 +52,14 @@ export interface ApiNodeProvisionRequest {
   protocol?: string;
 }
 
+export interface ApiNodeUpdate {
+  name?: string;
+  department_id?: number;
+  hardware_type?: string;
+  firmware_version?: string;
+  location?: string | null;
+}
+
 export interface ApiNodeProvisionResponse {
   node_id: string;
   name: string;
@@ -274,6 +282,13 @@ class ApiService {
   async getNodes(departmentId?: number | string): Promise<ApiNode[]> {
     const query = departmentId && departmentId !== 'all' ? `?department_id=${departmentId}` : '';
     return this.request<ApiNode[]>(`/nodes${query}`);
+  }
+
+  async updateNode(nodeId: string, data: ApiNodeUpdate): Promise<ApiNode> {
+    return this.request<ApiNode>(`/nodes/${encodeURIComponent(nodeId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
   }
 
   async getDashboardOverview(departmentId?: number | string): Promise<ApiDashboardOverview> {

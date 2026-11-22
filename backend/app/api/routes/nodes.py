@@ -2,11 +2,13 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from app.database.connection import get_db
+from app.database.models.department import Department
 from app.database.models.administrator import Administrator
 from app.api.routes.auth import get_current_admin
 from app.services.node_service import NodeService
 from app.schemas.node import (
     NodeCreate,
+    NodeUpdate,
     NodeResponse,
     NodeProvisionRequest,
     NodeProvisionResponse,
@@ -87,6 +89,37 @@ def provision_sensor_node(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
+        )
+
+
+@router.patch("/{node_id}", response_model=NodeResponse)
+def update_sensor_node(
+    node_id: str,
+    data: NodeUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_admin: Administrator = Depends(get_current_admin),
+):
+    """Edit descriptive device information; Node ID and MQTT identity remain fixed."""
+    try:
+        client_ip = request.client.host if request.client else None
+        node = NodeService.update_node(
+            db=db,
+            node_id=node_id,
+            data=data,
+            actor=current_admin.email,
+            ip_address=client_ip,
+        )
+        response = NodeResponse.model_validate(node)
+        department = db.get(Department, node.department_id)
+        response.department_name = department.name if department else None
+        response.has_api_key = bool(node.api_key_hash)
+        return response
+    except ValueError as e:
+        message = str(e)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND if "does not exist" in message else status.HTTP_400_BAD_REQUEST,
+            detail=message,
         )
 
 
