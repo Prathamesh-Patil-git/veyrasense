@@ -515,6 +515,11 @@ echo "[6/9] Applying Alembic migrations."
 
 MIGRATION_STARTED=1
 
+# Alembic must run as the same unprivileged account as the backend.
+# Give that account access to the staged release before invoking it.
+chown veyrasense:veyrasense "${TARGET_RELEASE_DIR}"
+chown -R veyrasense:veyrasense "${TARGET_RELEASE_DIR}/backend"
+
 (
     cd "${TARGET_RELEASE_DIR}/backend"
 
@@ -530,7 +535,10 @@ MIGRATION_STARTED=1
 
     fi
 
-    "${TARGET_RELEASE_DIR}/backend/.venv/bin/alembic" upgrade head
+    # Run migrations as the backend service account so SQLite creates
+    # the database and any journal files with the correct ownership.
+    runuser --preserve-environment --user veyrasense -- \
+        "${TARGET_RELEASE_DIR}/backend/.venv/bin/alembic" upgrade head
 )
 
 echo "[INFO] Database migrations completed."
