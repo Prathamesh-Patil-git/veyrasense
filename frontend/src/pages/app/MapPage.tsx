@@ -1,12 +1,40 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Network, Radio, ShieldCheck, Cpu } from 'lucide-react';
 import { NetworkTopology3D } from '../../components/3d/NetworkTopology3D';
-import { MOCK_SENSOR_NODES, type SensorTelemetryItem } from '../../mock/dashboardData';
+import { type SensorTelemetryItem } from '../../mock/dashboardData';
 import { useDepartment } from '../../context/DepartmentContext';
+import { api } from '../../services/api';
 
 export const MapPage: React.FC = () => {
   const { selectedDepartmentId, activeDepartment } = useDepartment();
+  const [nodes, setNodes] = useState<SensorTelemetryItem[]>([]);
   const [selectedNode, setSelectedNode] = useState<SensorTelemetryItem | null>(null);
+
+  useEffect(() => {
+    api.getNodes()
+      .then((apiNodes) => {
+        const mapped: SensorTelemetryItem[] = apiNodes.map((n) => ({
+          id: n.node_id,
+          name: n.name,
+          departmentId: `dept-${n.department_id}`,
+          departmentName: n.department_name || 'Plant Fleet',
+          sensorType: n.hardware_type,
+          hardwareModel: n.hardware_type,
+          healthStatus: (n.status === 'connected' ? 'healthy' : n.status === 'alert' ? 'alert' : 'offline') as any,
+          latestMeasurement: 0,
+          unit: '',
+          varianceScore: '0.00',
+          lastReceived: n.last_seen_at || n.registered_at,
+          protocol: 'MQTT',
+          firmware: n.firmware_version,
+          sparkline: [0, 0, 0, 0, 0],
+        }));
+        setNodes(mapped);
+      })
+      .catch(() => {
+        setNodes([]);
+      });
+  }, []);
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-200">
@@ -22,8 +50,8 @@ export const MapPage: React.FC = () => {
               3D Sensor Network Mesh & Gateway Topology
             </h2>
           </div>
-          <span className="text-[10px] font-extrabold uppercase px-3 py-1 rounded-full bg-[#FFF9DE] text-[#875B00] self-start sm:self-auto shadow-2xs">
-            WebGL 3D Engine Active • Simulated Topology
+          <span className="text-[10px] font-extrabold uppercase px-3 py-1 rounded-full bg-[#E8FAF1] text-[#0C5A37] self-start sm:self-auto shadow-2xs">
+            WebGL 3D Engine Active
           </span>
         </div>
         <p className="text-xs sm:text-sm text-[#5A687C] mt-3 leading-relaxed max-w-3xl">
@@ -33,7 +61,7 @@ export const MapPage: React.FC = () => {
 
       {/* Main 3D Topology Visualization Scene */}
       <NetworkTopology3D
-        nodes={MOCK_SENSOR_NODES}
+        nodes={nodes}
         selectedDepartmentId={selectedDepartmentId}
         onSelectNode={(node) => setSelectedNode(node)}
       />
@@ -63,13 +91,13 @@ export const MapPage: React.FC = () => {
             <Cpu className="w-4 h-4 text-[#FFD21C]" />
             <span>Gateway Host Coordinator</span>
           </div>
-          <div className="text-xl font-black text-[#172238]">Raspberry Pi 5 (4GB / 64GB)</div>
+          <div className="text-xl font-black text-[#172238]">Raspberry Pi 5</div>
           <p className="text-xs text-[#5A687C] leading-relaxed">
             Local edge broker hosting Mosquitto MQTT & embedded SQLite with Write-Ahead Logging.
           </p>
           <div className="pt-2 flex items-center justify-between text-xs font-mono font-bold text-[#0C5A37]">
-            <span>Coordinator State: Optimal</span>
-            <span className="bg-[#E8FAF1] px-2 py-0.5 rounded-full">0.42ms RTT</span>
+            <span>Coordinator State: Nominal</span>
+            <span className="bg-[#E8FAF1] px-2 py-0.5 rounded-full">Active</span>
           </div>
         </div>
 
@@ -78,13 +106,13 @@ export const MapPage: React.FC = () => {
             <Radio className="w-4 h-4 text-[#5BA4F5]" />
             <span>Communication Link Mesh</span>
           </div>
-          <div className="text-xl font-black text-[#172238]">16 Nodes Synchronized</div>
+          <div className="text-xl font-black text-[#172238]">{nodes.length} Nodes Synchronized</div>
           <p className="text-xs text-[#5A687C] leading-relaxed">
-            Dual-band LoRa / MQTT local wireless link with automatic packet deduplication.
+            Local wireless and Ethernet sensor telemetry links with automated deduplication.
           </p>
           <div className="pt-2 flex items-center justify-between text-xs font-mono font-bold text-[#134685]">
-            <span>Packet Integrity: 100%</span>
-            <span className="bg-[#EBF4FE] px-2 py-0.5 rounded-full">-68 dBm Avg</span>
+            <span>Link State: {nodes.length > 0 ? 'Connected' : 'Standby'}</span>
+            <span className="bg-[#EBF4FE] px-2 py-0.5 rounded-full">{nodes.length} Transducers</span>
           </div>
         </div>
 
@@ -95,11 +123,11 @@ export const MapPage: React.FC = () => {
           </div>
           <div className="text-xl font-black text-[#172238]">Neighbour Correlation Active</div>
           <p className="text-xs text-[#5A687C] leading-relaxed">
-            Multi-transducer spatial cross-checking detects localized physical vs sensor drift.
+            Multi-transducer spatial cross-checking detects localized physical changes vs sensor drift.
           </p>
-          <div className="pt-2 flex items-center justify-between text-xs font-mono font-bold text-[#875B00]">
+          <div className="pt-2 flex items-center justify-between text-xs font-mono font-bold text-[#0C5A37]">
             <span>Active Department: {activeDepartment.name}</span>
-            <span className="bg-[#FFF9DE] px-2 py-0.5 rounded-full">Simulated</span>
+            <span className="bg-[#E8FAF1] px-2 py-0.5 rounded-full">Ready</span>
           </div>
         </div>
       </div>

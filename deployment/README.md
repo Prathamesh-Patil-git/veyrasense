@@ -13,8 +13,8 @@ The VeyraSense Gateway deploys as an atomic, zero-downtime, unprivileged system 
 ```
                               [ Physical / Simulated ESP32 Fleet ]
                                        |              |
-                    MQTT Port 1883     |              |   HTTP Port 80 (LAN)
-                   (Per-Node ACL)     |              |   (X-Device-Key)
+                    MQTT Port 1884     |              |   HTTP Port 80 (LAN)
+                   (VeyraSense ACL)   |              |   (X-Device-Key)
                                        v              v
 +-----------------------------------------------------------------------------------------+
 | RASPBERRY PI 5 GATEWAY (Debian 13 ARM64)                                                |
@@ -115,9 +115,9 @@ SECRET_KEY="<64_CHARACTER_RANDOM_HEX_SECRET>"
 ALGORITHM="HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES=480
 
-# Mosquitto MQTT Internal Gateway Credentials
+# Mosquitto MQTT Internal Gateway Credentials (Port 1884 Isolated Listener)
 MQTT_BROKER_HOST="127.0.0.1"
-MQTT_BROKER_PORT=1883
+MQTT_BROKER_PORT=1884
 MQTT_BACKEND_USERNAME="veyrasense_backend"
 MQTT_BACKEND_PASSWORD="<RANDOM_BACKEND_PASSWORD>"
 
@@ -204,6 +204,6 @@ curl -s http://127.0.0.1:8000/api/v1/health | jq .
 # Verify Nginx routing
 curl -s http://127.0.0.1/api/v1/health | jq .
 
-# Test Mosquitto authentication
-mosquitto_sub -h 127.0.0.1 -p 1883 -u veyrasense_backend -P "<PASSWORD>" -t "veyrasense/nodes/+/status"
+# Test Mosquitto authentication (Port 1884)
+mosquitto_sub -h 127.0.0.1 -p 1884 -u veyrasense_backend -P "<PASSWORD>" -t "veyrasense/nodes/+/status"
 ```

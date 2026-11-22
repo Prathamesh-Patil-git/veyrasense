@@ -28,7 +28,7 @@ export const Footer: React.FC = () => {
 
           <div className="flex items-center gap-2 text-xs text-slate-400 bg-[#1A263E] px-3.5 py-1.5 rounded-xl border border-[#263756]">
             <span className="w-2 h-2 rounded-full bg-[#5BA4F5]" />
-            <span>Mosquitto MQTT 1883 • SQLite Synced • Local Loop Safe</span>
+            <span>Mosquitto MQTT 1884 • SQLite Synced • Local Loop Safe</span>
           </div>
         </div>
       </div>

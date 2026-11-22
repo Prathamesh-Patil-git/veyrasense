@@ -189,7 +189,12 @@ def revoke_token(db: Session, token: str) -> None:
 # ==============================================================================
 # 4. Device & MQTT Dynamic Provisioning Credentials
 # ==============================================================================
+import base64
+import os
 import secrets
+import shutil
+import subprocess
+import tempfile
 
 
 def generate_secure_device_secret(length: int = 32) -> str:
@@ -204,7 +209,92 @@ def generate_node_id(dept_code: str = "ESP32") -> str:
     return f"NODE-{clean_code}-{suffix}"
 
 
+def hash_mosquitto_password(password: str, iterations: int = 20000) -> str:
+    """Generate a Mosquitto 2.0-compatible PBKDF2-SHA512 ($7$) password hash.
+
+    Format: $7$<iterations>$<base64_salt>$<base64_hash>
+    Uses 12 random bytes of cryptographic salt.
+    If the 'mosquitto_passwd' CLI binary is installed on the host, uses it directly;
+    otherwise generates the hash via Python standard library hashlib.pbkdf2_hmac,
+    guaranteeing identical format across both physical Pi 5 and local development.
+    """
+    mosq_bin = shutil.which("mosquitto_passwd")
+    if mosq_bin:
+        try:
+            with tempfile.NamedTemporaryFile(delete=False) as tf:
+                temp_path = tf.name
+            try:
+                cmd = [
+                    mosq_bin,
+                    "-c",
+                    "-b",
+                    "-H",
+                    "sha512-pbkdf2",
+                    "-I",
+                    str(iterations),
+                    temp_path,
+                    "tmpuser",
+                    password,
+                ]
+                proc = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=5,
+                )
+                if proc.returncode == 0:
+                    content = Path(temp_path).read_text(encoding="utf-8").strip()
+                    for line in content.splitlines():
+                        if line.startswith("tmpuser:"):
+                            pw_hash = line.split(":", 1)[1].strip()
+                            if pw_hash.startswith("$7$"):
+                                return pw_hash
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+        except Exception:
+            pass
+
+    # Native Python standard library PBKDF2-HMAC-SHA512 fallback ($7$ format)
+    salt_bytes = secrets.token_bytes(12)
+    derived_key = hashlib.pbkdf2_hmac(
+        "sha512",
+        password.encode("utf-8"),
+        salt_bytes,
+        iterations,
+        dklen=64,
+    )
+    salt_b64 = base64.b64encode(salt_bytes).decode("ascii")
+    hash_b64 = base64.b64encode(derived_key).decode("ascii")
+    return f"$7${iterations}${salt_b64}${hash_b64}"
+
+
+def verify_mosquitto_password(password: str, hash_str: str) -> bool:
+    """Verify a plain password against a Mosquitto $7$ PBKDF2-SHA512 password hash."""
+    try:
+        if not hash_str or not hash_str.startswith("$7$"):
+            return False
+        parts = hash_str.split("$")
+        # Format: ['', '7', '<iterations>', '<salt_b64>', '<hash_b64>']
+        if len(parts) != 5:
+            return False
+        iterations = int(parts[2])
+        salt = base64.b64decode(parts[3])
+        expected_hash = base64.b64decode(parts[4])
+        computed_hash = hashlib.pbkdf2_hmac(
+            "sha512",
+            password.encode("utf-8"),
+            salt,
+            iterations,
+            dklen=len(expected_hash),
+        )
+        return secrets.compare_digest(computed_hash, expected_hash)
+    except Exception:
+        return False
+
+
 def hash_mqtt_password(password: str) -> str:
-    """Hash MQTT device password using SHA-256 for deterministic authentication and Mosquitto integration."""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    """Hash MQTT device password using Mosquitto-compatible PBKDF2-SHA512 ($7$) format."""
+    return hash_mosquitto_password(password)
+
 

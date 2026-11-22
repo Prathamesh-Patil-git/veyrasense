@@ -103,6 +103,15 @@ export interface ApiNodeAuditResponse {
   ip_address?: string;
 }
 
+export interface ApiAdminProfile {
+  id: number;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  created_at: string;
+  last_login_at?: string;
+}
+
 export interface ApiMetricSummary {
   label: string;
   value: number | string;
@@ -248,6 +257,10 @@ class ApiService {
     } finally {
       this.setToken(null);
     }
+  }
+
+  async getMe(): Promise<ApiAdminProfile> {
+    return this.request<ApiAdminProfile>('/auth/me');
   }
 
   async getHealth(): Promise<ApiHealth> {

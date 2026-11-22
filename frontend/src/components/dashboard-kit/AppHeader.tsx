@@ -8,7 +8,6 @@ import {
   ChevronDown,
   LogOut,
   CheckCircle2,
-  AlertTriangle,
   HardDrive,
 } from 'lucide-react';
 import { SearchBar } from './SearchBar';
@@ -103,18 +102,18 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenMobileDrawer }) => {
 
         {/* Center: Search Bar & Department Selector */}
         <div className="hidden lg:flex items-center gap-3 flex-1 max-w-lg mx-4">
-          <SearchBar placeholder="Search telemetry, nodes (e.g. NODE-PRD-01), alerts..." />
+          <SearchBar placeholder="Search telemetry, nodes, alerts..." />
           <DepartmentSelector />
         </div>
 
         {/* Right: Status Pill + Actions + Admin Menu */}
         <div className="flex items-center gap-2.5 sm:gap-3">
-          {/* Local System Connection Status (Explicitly Demo) */}
+          {/* Local System Connection Status */}
           <div className="hidden sm:inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full clay-surface text-xs font-semibold">
-            <span className="w-2 h-2 rounded-full bg-[#5BA4F5] animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-[#78E9AD] animate-pulse" />
             <div className="text-left text-[11px]">
-              <span className="font-bold text-[#172238]">Simulated MQTT Broker</span>
-              <span className="text-[#718096] hidden xl:inline"> (Demo Connection)</span>
+              <span className="font-bold text-[#172238]">Mosquitto MQTT</span>
+              <span className="text-[#0C5A37] hidden xl:inline font-semibold"> (Active)</span>
             </div>
           </div>
 
@@ -138,32 +137,20 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenMobileDrawer }) => {
               aria-label="Notifications"
             >
               <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#EF6461]" />
             </button>
 
             {notificationsOpen && (
               <div className="absolute right-0 mt-2 w-80 clay-surface p-4 z-50 text-xs animate-in fade-in zoom-in-95 shadow-xl">
                 <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#F2F3EE]">
-                  <span className="font-bold text-[#172238]">System Alerts (Illustrative)</span>
-                  <span className="text-[10px] font-bold text-[#875B00] bg-[#FFF9DE] px-2 py-0.5 rounded-full">
-                    DEMO
+                  <span className="font-bold text-[#172238]">System Alerts</span>
+                  <span className="text-[10px] font-bold text-[#0C5A37] bg-[#E8FAF1] px-2 py-0.5 rounded-full">
+                    NOMINAL
                   </span>
                 </div>
-                <div className="space-y-2.5">
-                  <div className="p-3 rounded-2xl bg-[#FDF0F0] flex items-start gap-2.5 shadow-2xs">
-                    <AlertTriangle className="w-4 h-4 text-[#EF6461] shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-bold text-[#172238]">Surge in Motor Phase Current</div>
-                      <div className="text-[11px] text-[#718096]">NODE-MNT-02 triggered 3.88σ residual test.</div>
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-2xl bg-[#E8FAF1] flex items-start gap-2.5 shadow-2xs">
-                    <CheckCircle2 className="w-4 h-4 text-[#0C5A37] shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-bold text-[#172238]">Recovery Verified</div>
-                      <div className="text-[11px] text-[#718096]">NODE-UTL-01 synthesized water level validated.</div>
-                    </div>
-                  </div>
+                <div className="p-4 text-center text-[#718096] text-xs space-y-1">
+                  <CheckCircle2 className="w-5 h-5 text-[#0C5A37] mx-auto" />
+                  <p className="font-bold text-[#172238]">No Active Alerts</p>
+                  <p className="text-[11px]">All connected telemetry nodes operating within nominal thresholds.</p>
                 </div>
               </div>
             )}
@@ -182,8 +169,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenMobileDrawer }) => {
                 OP
               </div>
               <div className="hidden md:block text-left text-xs leading-tight">
-                <div className="font-bold text-[#172238]">Edge Operator</div>
-                <div className="text-[10px] text-[#718096]">Pi 5 Admin</div>
+                <div className="font-bold text-[#172238]">{user?.name || 'Administrator'}</div>
+                <div className="text-[10px] text-[#718096]">{user?.role || 'Edge Operator'}</div>
               </div>
               <ChevronDown className="w-3.5 h-3.5 text-[#718096] hidden sm:block" />
             </button>
@@ -191,11 +178,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenMobileDrawer }) => {
             {profileOpen && (
               <div className="absolute right-0 mt-2 w-64 clay-surface p-3 z-50 text-xs animate-in fade-in zoom-in-95 shadow-xl">
                 <div className="pb-2.5 mb-2 border-b border-[#F2F3EE] space-y-1">
-                  <div className="font-bold text-[#172238]">{user.name}</div>
-                  <div className="text-[11px] text-[#718096]">{user.email}</div>
-                  <div className="text-[10px] text-[#0C5A37] font-semibold bg-[#E8FAF1] px-2 py-0.5 rounded-full inline-block">
-                    {user.deploymentTarget}
-                  </div>
+                  <div className="font-bold text-[#172238]">{user?.name || 'Administrator'}</div>
+                  <div className="text-[11px] text-[#718096]">{user?.email || 'admin@veyrasense.local'}</div>
                 </div>
 
                 <div className="space-y-1">

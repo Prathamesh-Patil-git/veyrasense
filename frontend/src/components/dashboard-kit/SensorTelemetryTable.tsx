@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Zap, X } from 'lucide-react';
+import { Search, Zap, X, Radio } from 'lucide-react';
 import type { SensorTelemetryItem } from '../../mock/dashboardData';
 import { StatusBadge } from './StatusBadge';
 import { Button } from '../ui/Button';
@@ -51,9 +51,6 @@ export const SensorTelemetryTable: React.FC<SensorTelemetryTableProps> = ({
             <h3 className="text-xl font-black text-[#172238] tracking-tight">
               Live Sensor Telemetry Surveillance
             </h3>
-            <span className="text-[10px] font-bold text-[#875B00] bg-[#FFF9DE] px-2.5 py-0.5 rounded-full shadow-2xs">
-              Simulated Feed
-            </span>
           </div>
           <p className="text-xs text-[#718096] mt-0.5">
             Streaming readings across {departmentName} edge transducers with active anomaly verification.
@@ -110,8 +107,16 @@ export const SensorTelemetryTable: React.FC<SensorTelemetryTableProps> = ({
           <tbody className="divide-y divide-[#F7F7F0] text-xs">
             {filteredNodes.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-xs text-[#718096]">
-                  No matching sensor nodes found for "{searchTerm}".
+                <td colSpan={8} className="py-12 text-center text-xs text-[#718096]">
+                  <div className="flex flex-col items-center justify-center space-y-2">
+                    <Radio className="w-6 h-6 text-[#A0AEC0] opacity-60" />
+                    <p className="font-bold text-[#172238]">No Telemetry Received Yet</p>
+                    <p className="text-[11px] max-w-sm text-[#718096]">
+                      {searchTerm
+                        ? `No sensor nodes match the filter "${searchTerm}".`
+                        : `No active sensor nodes are currently transmitting in ${departmentName}. Provision a new ESP32 node to initiate telemetry streaming.`}
+                    </p>
+                  </div>
                 </td>
               </tr>
             ) : (
@@ -195,7 +200,7 @@ export const SensorTelemetryTable: React.FC<SensorTelemetryTableProps> = ({
               </div>
               <div className="flex justify-between">
                 <span className="text-[#718096]">Active Protocol:</span>
-                <span className="font-semibold text-[#172238]">Calibrated Step Response (Simulated)</span>
+                <span className="font-semibold text-[#172238]">Calibrated Step Response</span>
               </div>
             </div>
 

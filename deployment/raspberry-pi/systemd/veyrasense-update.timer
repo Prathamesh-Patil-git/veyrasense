@@ -1,12 +1,19 @@
+
 [Unit]
-Description=Periodic Check for VeyraSense Releases (Daily)
-After=network-online.target
+Description=Daily VeyraSense Release Check and Deployment
 
 [Timer]
-# Trigger daily at 03:00 local time with random jitter to prevent load spikes
+# Run daily at 03:00 according to the Raspberry Pi's local timezone.
 OnCalendar=*-*-* 03:00:00
+
+# Randomize execution by up to 30 minutes.
 RandomizedDelaySec=1800
+
+# Run a missed deployment after the Pi starts again.
 Persistent=true
+
+# Do not run another deployment while the previous one is active.
+Unit=veyrasense-update.service
 
 [Install]
 WantedBy=timers.target

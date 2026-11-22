@@ -1,11 +1,19 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Building2, ArrowRight } from 'lucide-react';
 import { useDepartment } from '../../context/DepartmentContext';
-import { DEPARTMENTS, MOCK_SENSOR_NODES } from '../../mock/dashboardData';
+import { DEPARTMENTS } from '../../mock/dashboardData';
+import { api, type ApiNode } from '../../services/api';
 import { Button } from '../../components/ui/Button';
 
 export const DepartmentsPage: React.FC = () => {
   const { setSelectedDepartmentId } = useDepartment();
+  const [nodes, setNodes] = useState<ApiNode[]>([]);
+
+  useEffect(() => {
+    api.getNodes()
+      .then((data) => setNodes(data))
+      .catch(() => setNodes([]));
+  }, []);
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-200">
@@ -20,19 +28,21 @@ export const DepartmentsPage: React.FC = () => {
               Industrial Department Fleets
             </h2>
           </div>
-          <span className="text-[10px] font-extrabold uppercase px-3 py-1 rounded-full bg-[#FFF9DE] text-[#875B00] self-start sm:self-auto shadow-2xs">
-            SIMULATED • UI PROTOTYPE
+          <span className="text-[10px] font-extrabold uppercase px-3 py-1 rounded-full bg-[#E8FAF1] text-[#0C5A37] self-start sm:self-auto shadow-2xs">
+            Fleet Partitions Configured
           </span>
         </div>
         <p className="text-xs sm:text-sm text-[#5A687C] mt-3 leading-relaxed max-w-3xl">
-          Contextual department isolation allows local operators to focus surveillance and challenge protocols on specialized processes. (Status: The 7 departments and sensor fleet aggregates below are Simulated for this UI prototype).
+          Contextual department isolation allows local operators to focus surveillance and challenge protocols on specialized processes.
         </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {DEPARTMENTS.filter((d) => d.id !== 'all').map((dept) => {
-          const deptNodes = MOCK_SENSOR_NODES.filter((n) => n.departmentId === dept.id);
-          const healthyNodes = deptNodes.filter((n) => n.healthStatus === 'healthy').length;
+        {DEPARTMENTS.filter((d) => d.id !== 'all').map((dept, idx) => {
+          // Department IDs in backend are numeric (1..7)
+          const deptNumericId = idx + 1;
+          const deptNodes = nodes.filter((n) => n.department_id === deptNumericId);
+          const healthyNodes = deptNodes.filter((n) => n.status === 'connected' || n.status === 'healthy').length;
 
           return (
             <div

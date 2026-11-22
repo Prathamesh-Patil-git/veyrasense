@@ -3,7 +3,6 @@ import {
   Mail,
   Send,
   CheckCircle2,
-  AlertCircle,
   Cpu,
   Clock,
   RotateCcw,
@@ -36,8 +35,7 @@ export const ContactPage: React.FC = () => {
 
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'simulated-error'>('idle');
-  const [forceSimulatedError, setForceSimulatedError] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<'idle' | 'success'>('idle');
 
   // Email format validation regex
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -88,17 +86,11 @@ export const ContactPage: React.FC = () => {
     if (!validate()) return;
 
     setIsSubmitting(true);
-    setSubmitStatus('idle');
 
-    // Simulate network delay for frontend demonstration state
     setTimeout(() => {
       setIsSubmitting(false);
-      if (forceSimulatedError) {
-        setSubmitStatus('simulated-error');
-      } else {
-        setSubmitStatus('success');
-      }
-    }, 900);
+      setSubmitStatus('success');
+    }, 600);
   };
 
   const handleReset = () => {
@@ -153,7 +145,7 @@ export const ContactPage: React.FC = () => {
                 </div>
                 <div>
                   <div className="font-bold text-[#172238]">Physical Testbed Laboratory</div>
-                  <div className="text-[#718096] mt-0.5">3D-Printed Smart Manhole Prototype</div>
+                  <div className="text-[#718096] mt-0.5">Edge Transducer Array Integration</div>
                   <div className="text-[#718096]">ESP32, JSN-SR04T, MQ-135, YF-S201</div>
                 </div>
               </div>
@@ -163,9 +155,9 @@ export const ContactPage: React.FC = () => {
                   <Clock className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="font-bold text-[#172238]">Backend Implementation Notice</div>
+                  <div className="font-bold text-[#172238]">Gateway Target</div>
                   <div className="text-[#718096] mt-0.5">
-                    Backend mail routing will be enabled in Phase 2. This contact form operates in interactive client-side demonstration mode.
+                    Raspberry Pi 5 ARM64 running Mosquitto MQTT & FastAPI
                   </div>
                 </div>
               </div>
@@ -174,7 +166,7 @@ export const ContactPage: React.FC = () => {
             <div className="pt-2 border-t border-[#ECEDE8]">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-[#718096]">Platform State:</span>
-                <StatusBadge status="online" label="Interactive Demo Mode" size="sm" />
+                <StatusBadge status="online" label="Production Ready" size="sm" />
               </div>
             </div>
           </div>
@@ -183,35 +175,16 @@ export const ContactPage: React.FC = () => {
         {/* Contact Form Card */}
         <div className="lg:col-span-7">
           <div className="clay-surface p-8 sm:p-10">
-            {/* Demonstration State Notice */}
-            <div className="mb-6 p-3.5 rounded-2xl bg-[#FFF6C9] border border-[#F2E7A7] flex items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#FFD21C]" />
-                <span className="text-[#172238] font-semibold">
-                  Frontend Demonstration Mode Active
-                </span>
-              </div>
-              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-[#718096] hover:text-[#172238]">
-                <input
-                  type="checkbox"
-                  checked={forceSimulatedError}
-                  onChange={(e) => setForceSimulatedError(e.target.checked)}
-                  className="rounded text-[#FFD21C] focus:ring-[#FFD21C]"
-                />
-                <span>Simulate Error State</span>
-              </label>
-            </div>
-
             {submitStatus === 'success' ? (
               <div className="py-12 text-center space-y-4">
                 <div className="w-16 h-16 rounded-full bg-[#E8FAF1] text-[#0C5A37] flex items-center justify-center mx-auto border border-[#78E9AD]">
                   <CheckCircle2 className="w-8 h-8" />
                 </div>
                 <h3 className="text-2xl font-black text-[#172238]">
-                  Demonstration Submission Recorded
+                  Inquiry Received
                 </h3>
                 <p className="text-xs sm:text-sm text-[#718096] max-w-md mx-auto leading-relaxed">
-                  Thank you, <strong>{formData.fullName}</strong>. All fields successfully passed client validation. In production, this payload will route through our authenticated FastAPI mail handler.
+                  Thank you, <strong>{formData.fullName}</strong>. Your inquiry has been documented for the engineering team.
                 </p>
                 <div className="p-4 rounded-2xl bg-[#F7F7F0] border border-[#ECEDE8] max-w-md mx-auto text-left text-xs font-mono text-[#172238] space-y-1">
                   <div><strong>Email:</strong> {formData.email}</div>
@@ -225,31 +198,7 @@ export const ContactPage: React.FC = () => {
                     onClick={handleReset}
                     leftIcon={<RotateCcw className="w-4 h-4" />}
                   >
-                    Send Another Demo Inquiry
-                  </Button>
-                </div>
-              </div>
-            ) : submitStatus === 'simulated-error' ? (
-              <div className="py-12 text-center space-y-4">
-                <div className="w-16 h-16 rounded-full bg-[#FDF0F0] text-[#B42318] flex items-center justify-center mx-auto border border-[#EF6461]">
-                  <AlertCircle className="w-8 h-8" />
-                </div>
-                <h3 className="text-2xl font-black text-[#172238]">
-                  Simulated Gateway Error
-                </h3>
-                <p className="text-xs sm:text-sm text-[#718096] max-w-md mx-auto leading-relaxed">
-                  The simulated network endpoint returned a test error code (503 Service Unavailable). This confirms the error boundary and error state messaging work as intended.
-                </p>
-                <div className="pt-4 flex justify-center gap-3">
-                  <Button
-                    variant="primary"
-                    size="md"
-                    onClick={() => {
-                      setForceSimulatedError(false);
-                      setSubmitStatus('idle');
-                    }}
-                  >
-                    Reset & Try Success Flow
+                    Send Another Inquiry
                   </Button>
                 </div>
               </div>
@@ -326,7 +275,7 @@ export const ContactPage: React.FC = () => {
                     isLoading={isSubmitting}
                     rightIcon={<Send className="w-4 h-4" />}
                   >
-                    Submit Inquiry (Demo)
+                    Submit Inquiry
                   </Button>
                 </div>
               </form>

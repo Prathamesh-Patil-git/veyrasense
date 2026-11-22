@@ -1,32 +1,50 @@
+
 [Unit]
-Description=VeyraSense MQTT Telemetry Ingestion Worker Daemon
-After=network.target mosquitto.service veyrasense-backend.service
+Description=VeyraSense MQTT Telemetry Ingestion Worker
+
+# MQTT ingestion requires the broker, but should operate independently
+# of the FastAPI backend.
+Wants=network-online.target
+After=network-online.target mosquitto.service
 Requires=mosquitto.service
+
+StartLimitIntervalSec=300
+StartLimitBurst=10
 
 [Service]
 Type=simple
+
 User=veyrasense
 Group=veyrasense
+
 WorkingDirectory=/opt/veyrasense/current/backend
+
 EnvironmentFile=/etc/veyrasense/veyrasense.env
 
-# Run dedicated MQTT worker daemon
+# Verify the active release has its virtual environment.
+ExecStartPre=/usr/bin/test -x /opt/veyrasense/current/backend/.venv/bin/python
+
+# Start the dedicated MQTT ingestion worker.
 ExecStart=/opt/veyrasense/current/backend/.venv/bin/python -m app.mqtt_worker
 
-# Process Reliability
-Restart=always
+# Process reliability
+Restart=on-failure
 RestartSec=5s
+TimeoutStartSec=60s
+TimeoutStopSec=30s
 KillMode=mixed
-TimeoutStopSec=10s
 
-# Security Hardening
+# Filesystem and process restrictions
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/veyrasense /var/log/veyrasense /run
 PrivateTmp=true
 
-# Standard Output & Logging
+ReadWritePaths=/var/lib/veyrasense
+ReadWritePaths=/var/log/veyrasense
+ReadWritePaths=/run
+
+# Dedicated worker logs
 StandardOutput=append:/var/log/veyrasense/mqtt-worker.log
 StandardError=append:/var/log/veyrasense/mqtt-worker.error.log
 

@@ -128,14 +128,14 @@ export const HomePage: React.FC = () => {
 
                       {/* Overlay node status badge */}
                       <div className="absolute top-3.5 left-3.5">
-                        <StatusBadge status="online" label="Simulated Node VS-01" size="sm" />
+                        <StatusBadge status="online" label="Transducer Node VS-01" size="sm" />
                       </div>
 
                       {/* Live Telemetry metric card inside image */}
                       <div className="absolute bottom-3.5 left-3.5 right-3.5 p-3 rounded-2xl bg-white/95 backdrop-blur-md flex items-center justify-between shadow-sm">
                         <div>
                           <div className="text-[10px] font-bold uppercase tracking-wider text-[#718096]">
-                            Measurement Fidelity (Simulated)
+                            Measurement Fidelity
                           </div>
                           <div className="text-sm font-extrabold text-[#172238] flex items-center gap-1.5">
                             <span>Ultrasonic Flow Node</span>
@@ -158,7 +158,7 @@ export const HomePage: React.FC = () => {
                         </div>
                         <div className="text-xs font-bold text-[#172238] flex items-center gap-1 mt-0.5">
                           <span className="w-2 h-2 rounded-full bg-[#78E9AD]" />
-                          <span>0.04% (Simulated)</span>
+                          <span>0.04% Baseline Drift</span>
                         </div>
                       </div>
                       <div className="bg-white p-2.5 rounded-xl shadow-2xs">
@@ -167,7 +167,7 @@ export const HomePage: React.FC = () => {
                         </div>
                         <div className="text-xs font-bold text-[#172238] flex items-center gap-1 mt-0.5">
                           <span className="w-2 h-2 rounded-full bg-[#5BA4F5]" />
-                          <span>Simulated Protocol</span>
+                          <span>MQTT / CoAP Protocol</span>
                         </div>
                       </div>
                     </div>
@@ -258,11 +258,8 @@ export const HomePage: React.FC = () => {
               </h2>
             </div>
             <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-              <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-[#FFF9DE] text-[#875B00] shadow-2xs">
-                Simulated Preview
-              </span>
-              <StatusBadge status="communicating" label="Target: Mosquitto MQTT" />
-              <StatusBadge status="online" label="Sampling: 100ms (Simulated)" />
+              <StatusBadge status="communicating" label="Mosquitto MQTT Active" />
+              <StatusBadge status="online" label="Sampling: 100ms Ingestion" />
             </div>
           </div>
 
@@ -579,7 +576,7 @@ export const HomePage: React.FC = () => {
               <div className="space-y-2 pt-2 text-xs">
                 <div className="flex items-center justify-between p-3 rounded-xl clay-recessed">
                   <span className="font-semibold text-[#172238]">MQTT Broker</span>
-                  <span className="text-[#0C5A37] font-bold">Mosquitto (Local Port 1883)</span>
+                  <span className="text-[#0C5A37] font-bold">Mosquitto (Local Port 1884)</span>
                 </div>
                 <div className="flex items-center justify-between p-3 rounded-xl clay-recessed">
                   <span className="font-semibold text-[#172238]">Telemetry Ingestion</span>

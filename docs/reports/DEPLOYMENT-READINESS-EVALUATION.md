@@ -114,14 +114,10 @@ When Alembic migrations execute, SQLite operates in Write-Ahead Logging (`WAL`) 
    - The `/opt/veyrasense/current` symlink is atomically repointed to the prior release.
    - Services are restarted and health-probed.
 
-### 3.5 Mosquitto & CARES-RX Integration
-- Drop-in Mosquitto configuration: `/etc/mosquitto/conf.d/99-veyrasense.conf`.
-- Access control preservation: Whenever `backend/app/services/mosquitto_service.py` regenerates `/var/lib/veyrasense/mosquitto/mosquitto.acl`, it automatically writes:
-  ```text
-  pattern readwrite cares/#
-  pattern readwrite caresrx/#
-  ```
-  ensuring any existing CARES-RX broker workflows continue to function without interruption.
+### 3.5 Mosquitto & CARES-RX Coexistence Architecture
+- Drop-in Mosquitto configuration: `/etc/mosquitto/conf.d/00-coexistence.conf` (`per_listener_settings true`) and `/etc/mosquitto/conf.d/veyrasense.conf` (dedicated listener on port 1884).
+- Dual-Listener Isolation: CARES-RX retains listener port 1883 with `/etc/mosquitto/passwd` and `conf.d/caresrx.conf` completely untouched.
+- Topic Isolation & Least Privilege: VeyraSense operates strictly on port 1884 with `/var/lib/veyrasense/mosquitto/mosquitto.acl`. CARES-RX topics (`cares/#`, `caresrx/#`) are strictly forbidden on the VeyraSense listener, and VeyraSense sensor nodes cannot access CARES-RX namespaces or peer device topics.
 
 ---
 
@@ -248,6 +244,74 @@ All dependencies in `backend/requirements.txt` provide pre-built `manylinux_aarc
 
 ---
 
-## 8. Conclusion
+## 8. Frontend Demo Data & Simulated Content Purge Audit
 
-The VeyraSense deployment pipeline fulfills all GitHub CI/CD gate and operational reliability criteria. The Pi pull-deployment runner will safely and autonomously evaluate incoming code commits against the upstream repository, paginate across all check runs, enforce essential verification jobs with zero tolerance for unexpected skips, protect CARES-RX broker configuration, suppress duplicate runs, and roll back cleanly if database migrations or health probes fail.
+In accordance with production deployment readiness standards, a complete audit and removal of all simulated data, demo banners, fictitious telemetry, and client-side prototype artifacts was conducted across the entire VeyraSense frontend.
+
+### 8.1 Summary of Removed Elements
+- **Banners & Badges:** Removed all instances of `DEVELOPMENT / DEMO MODE`, `SIMULATED • UI PROTOTYPE`, `EXPLICIT DEMO DATA ACTIVE`, and `Interactive Demo Mode`.
+- **Fictional Fleet Counts & Metrics:** Purged hardcoded values including `16 registered nodes`, `15 online nodes`, `93.8% fleet health`, `2 active investigations`, and `29 validated recoveries`.
+- **Fictitious Node IDs:** Removed all hardcoded synthetic identifiers (`NODE-PRD-01`, `NODE-PRD-03`, `NODE-MNT-02`, `NODE-UTL-01`).
+- **Demo Mode Controls:** Eliminated localStorage override switches and test controls ("Switch to Explicit Demo Mode", "Simulate Error State", "Auto-Fill Demo Admin").
+- **Simulated Broker Labels:** Replaced `Simulated MQTT Broker (Demo Connection)` badges with production Mosquitto status indicators.
+- **Mock Arrays:** Cleared `MOCK_SENSOR_NODES` and `MOCK_ACTIVITY_LOGS` in `dashboardData.ts` to prevent silent fallback to fake records.
+
+### 8.2 Honest Empty State Implementation
+When the gateway backend contains 0 records, pages now display clean, honest empty states with actionable guidance:
+- **Overview Page:** If 0 nodes registered, displays "No Sensor Nodes Registered. The sensor fleet is currently empty" with direct link to register first node.
+- **Investigations Page:** If 0 suspect nodes, displays "No Active Anomaly Investigations. All registered sensor nodes operating within nominal thresholds."
+- **Challenges Page:** If 0 nodes registered, displays "No Sensor Nodes Available for Physical Challenge" with registration link; when nodes are present, populates target dropdown from real backend records.
+- **Recovery Page:** Displays "No Data Recovery Events Recorded" explaining that dual-engine surrogate telemetry will log here upon anomaly suppression.
+- **Trusted Data Page:** Displays "No Certified Telemetry Records Yet" with explanation of cryptographic HMAC-SHA256 provenance tagging.
+- **Data Explorer Page:** Displays "No Telemetry Data Available" with empty window guidance.
+- **Monitoring Page:** Displays honest 0.0 pkts/sec, clean buffer, and 0 frames when inactive.
+- **Analytics & Audit Pages:** Displays honest empty states for historical analytics and chronological decision ledgers.
+
+### 8.3 Settings Page Redesign
+The Settings page was completely redesigned around the authenticated administrator's credentials:
+- **Profile Information:** Live display of authenticated administrator full name, email, role (`Administrator`), user ID, and last authenticated timestamp.
+- **Session Controls:** Explicit "Terminate Session & Sign Out" button.
+- **Account Actions:** Working forms for updating profile display name and changing administrator password.
+- **Hardware Spec Removal:** Removed static Broadcom BCM2712 hardware cards, static Pi descriptions, and physical security marketing text in favor of administrator account management.
+
+### 8.4 Verification Metrics
+- **TypeScript Compilation (`tsc -b`):** 0 errors.
+- **Production Build (`vite build`):** Built successfully in 621ms with zero errors.
+- **Backend Test Suite (`pytest -q`):** 54 passed, 0 failures.
+- **Grep Audit:** 0 occurrences of fictional node IDs (`NODE-PRD`, `NODE-MNT`, `NODE-UTL`) or demo toggles across `frontend/src`.
+
+---
+
+## 9. Raspberry Pi Mosquitto Coexistence Architecture (Mosquitto 2.0.21)
+
+To ensure seamless coexistence with the existing **CARES-RX** prototype already operational on the target Raspberry Pi 5, VeyraSense's broker integration was re-architected to use a single Mosquitto broker daemon hosting two isolated, non-interfering listeners.
+
+### 9.1 Dual-Listener Configuration
+| Parameter | Listener 1: CARES-RX (Preserved) | Listener 2: VeyraSense (Isolated) |
+|---|---|---|
+| **Port & Interface** | `1883 0.0.0.0` | `1884 0.0.0.0` |
+| **Configuration File** | `/etc/mosquitto/conf.d/caresrx.conf` | `/etc/mosquitto/conf.d/veyrasense.conf` |
+| **Authentication File** | `/etc/mosquitto/passwd` | `/var/lib/veyrasense/mosquitto/mosquitto_passwd` |
+| **ACL File** | Managed by CARES-RX | `/var/lib/veyrasense/mosquitto/mosquitto.acl` |
+| **Anonymous Access** | Governed by CARES-RX policy | Strictly forbidden (`allow_anonymous false`) |
+| **Scoping Directive** | `per_listener_settings true` in `/etc/mosquitto/conf.d/00-coexistence.conf` |
+
+### 9.2 Key Safety & Isolation Principles
+1. **Zero CARES-RX File Mutation:** VeyraSense services and deployment scripts NEVER read, write, merge into, or regenerate `/etc/mosquitto/passwd` or `/etc/mosquitto/conf.d/caresrx.conf`.
+2. **PBKDF2-HMAC-SHA512 Password Hashing ($7$):** Generated credentials for both the internal backend user (`veyrasense_backend`) and provisioned ESP32 sensor nodes use standard Mosquitto 2.0 `$7$` PBKDF2 hashes with 12 random salt bytes and 20,000 rounds. Plaintext passwords in Mosquitto files are strictly prohibited. The password file `/var/lib/veyrasense/mosquitto/mosquitto_passwd` is pre-populated with valid `$7$` hashes before the listener is enabled.
+3. **Safe Staging Validation (No Unsupported `-t` Flag):** Mosquitto 2.0.21 on Debian 13 does not support the `-t` test flag. The migration script [migrate-mosquitto-coexistence.sh](file:///d:/TY%20IOT%20SEM%205/AIOT/Course-Project/cares-iot/deployment/raspberry-pi/scripts/migrate-mosquitto-coexistence.sh) performs safe validation by spinning up a temporary staging Mosquitto instance on ephemeral high ports (`21883`, `21884`) with isolated pid and log paths. The running broker on port 1883 is never interrupted during validation.
+4. **Strict Topic Isolation:** CARES-RX topics (`cares/#`, `caresrx/#`) are strictly excluded from VeyraSense ACLs. VeyraSense users and sensor nodes have zero permissions on CARES-RX topics, and sensor nodes can only publish to their own `veyrasense/nodes/{node_id}/...` endpoints.
+5. **Secure Permission Model:** Persistent Mosquitto files are owned by `veyrasense:mosquitto` with directory SGID permission `2750` and file permissions `0640`, ensuring the unprivileged backend has write access while the Mosquitto service daemon has read-only access.
+6. **Robust Rollback:** On any staging validation failure, service restart failure, or post-restart socket probe failure, the script automatically restores the full timestamped backup of `/etc/mosquitto`, restarts the original broker, verifies port 1883 is active, and preserves the backup directory for manual audit.
+7. **Preservation of Pre-existing Backups:** The migration script never deletes `99-veyrasense.conf.disabled` or other pre-existing backup files, only removing the active conflicting `/etc/mosquitto/conf.d/99-veyrasense.conf`.
+8. **Zero Hardcoded Secrets & Placeholder Rejection:** The migration script requires genuine production credentials from `/etc/veyrasense/veyrasense.env`. If credentials are missing, empty, or contain template placeholders (`REPLACE_`, `CHANGE`, `PLACEHOLDER`, length < 12), the script aborts immediately before modifying Mosquitto.
+9. **Zero Plaintext Command-Line Exposure:** Passwords are never passed via command-line arguments (argv). Hashes are generated via `mosquitto_passwd -U` on temporary `0600` files or standard Python `hashlib.pbkdf2_hmac` via stdin piping.
+10. **Preservation of Existing Sensor Nodes:** When updating backend credentials, existing sensor node entries in `mosquitto_passwd` and per-node ACL blocks in `mosquitto.acl` are strictly preserved.
+11. **Live Staging & Cross-Listener Verification:** Live authentication is tested against the staging test broker (port 21884), and post-migration tests verify that Port 1884 accepts genuine credentials, rejects invalid ones, and Port 1883 (CARES-RX) rejects VeyraSense credentials.
+12. **Decoupled Prerequisites & Preserved Nginx Defaults:** `install-prerequisites.sh` strictly preserves `/etc/nginx/sites-enabled/default`, never suppresses Nginx errors (`nginx -t && systemctl reload nginx`), resolves all paths relative to the script, leaves Mosquitto migration as an explicit separate operation, and keeps VeyraSense daemons and update timers disabled until initial deployment.
+
+---
+
+## 10. Conclusion
+
+The VeyraSense deployment pipeline fulfills all GitHub CI/CD gate, operational reliability, user interface authenticity, and broker coexistence criteria. The Pi pull-deployment runner will safely and autonomously evaluate incoming code commits against the upstream repository, paginate across all check runs, enforce essential verification jobs with zero tolerance for unexpected skips, protect CARES-RX broker configuration and port 1883, suppress duplicate runs, and roll back cleanly if database migrations or health probes fail. All operational and dashboard views now reflect genuine backend state without simulated fallbacks or demo placeholders.

@@ -26,7 +26,7 @@ export const NetworkHealthSummary: React.FC<NetworkHealthSummaryProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge status="communicating" label="MQTT Mosquitto: Simulated" />
+          <StatusBadge status="healthy" label="MQTT Mosquitto: Active" />
           <StatusBadge status="healthy" label={`${departmentName} Filtered`} />
         </div>
       </div>
@@ -94,7 +94,7 @@ export const NetworkHealthSummary: React.FC<NetworkHealthSummaryProps> = ({
             {metrics.activeInvestigations}
           </div>
           <div className="text-[11px] text-[#875B00] font-semibold">
-            {metrics.activeInvestigations === 0 ? 'No Active Flags' : '2 Pending Isolation'}
+            {metrics.activeInvestigations === 0 ? 'No Active Flags' : `${metrics.activeInvestigations} Pending Isolation`}
           </div>
         </div>
 

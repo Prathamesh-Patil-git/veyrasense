@@ -1,11 +1,29 @@
+
 [Unit]
-Description=VeyraSense Automated Secure Update Service (Pi-Initiated Pull)
-After=network-online.target
+Description=VeyraSense Automated Update Service (Pi-Initiated Pull)
+
 Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=oneshot
+
 User=root
-ExecStart=/opt/veyrasense/scripts/pull-deploy.sh
+Group=root
+
+WorkingDirectory=/opt/veyrasense
+
+ExecStartPre=/usr/bin/test -x /opt/veyrasense/scripts/pull-deploy.sh
+ExecStart=/bin/bash /opt/veyrasense/scripts/pull-deploy.sh
+
+TimeoutStartSec=15min
+
+# Deployment logs
 StandardOutput=append:/var/log/veyrasense/deployment.log
 StandardError=append:/var/log/veyrasense/deployment.log
+
+# Basic process hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+

@@ -1,27 +1,158 @@
+
 #!/usr/bin/env bash
 # ==============================================================================
-# VeyraSense — Debian 13 (ARM64) Prerequisites & System Installation Script
-# Target: Raspberry Pi 5 (Debian 13 Trixie / Raspberry Pi OS 64-bit)
-# Run as: sudo bash install-prerequisites.sh
+# VeyraSense — Debian 13 / Raspberry Pi 5 Prerequisite Installer
 #
-# Preserves existing Mosquitto configurations and CARES-RX data.
+# Run:
+#   sudo bash install-prerequisites.sh
+#
+# Behavior:
+# - Validates source files before modifying the system.
+# - Validates shell scripts and systemd units.
+# - Preserves an existing production environment file.
+# - Preserves the Nginx default site.
+# - Backs up an existing VeyraSense Nginx configuration.
+# - Restores the previous Nginx configuration if validation fails.
+# - Does not migrate or modify Mosquitto configuration.
+# - Does not start or enable VeyraSense application services.
+# - Keeps deployment code root-owned.
+# - Keeps application data and logs writable by the service account.
 # ==============================================================================
 
-set -euo pipefail
+set -Eeuo pipefail
+umask 022
 
-# Require root
-if [[ $EUID -ne 0 ]]; then
-   echo "[ERROR] This installation script must be run as root (e.g., using sudo)." >&2
-   exit 1
+# ------------------------------------------------------------------------------
+# 1. Root and source directory
+# ------------------------------------------------------------------------------
+
+if [[ "${EUID}" -ne 0 ]]; then
+    echo "[ERROR] Run this script using sudo." >&2
+    exit 1
 fi
 
-echo "======================================================================"
-echo " VeyraSense Edge Gateway — System Installation (Debian 13 ARM64)"
-echo "======================================================================"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 1. Update APT and install required core system packages
-echo "[1/7] Updating APT repositories and installing dependencies..."
-apt-get update -y
+ENV_TEMPLATE="${SCRIPT_DIR}/../veyrasense.env.production.template"
+NGINX_TEMPLATE="${SCRIPT_DIR}/../nginx/veyrasense.conf"
+SYSTEMD_SRC_DIR="${SCRIPT_DIR}/../systemd"
+
+TARGET_ENV="/etc/veyrasense/veyrasense.env"
+
+NGINX_AVAILABLE="/etc/nginx/sites-available/veyrasense.conf"
+NGINX_ENABLED="/etc/nginx/sites-enabled/veyrasense.conf"
+
+BASE_INSTALL_DIR="/opt/veyrasense"
+RELEASES_DIR="${BASE_INSTALL_DIR}/releases"
+SCRIPTS_DIR="${BASE_INSTALL_DIR}/scripts"
+
+DATA_DIR="/var/lib/veyrasense"
+LOG_DIR="/var/log/veyrasense"
+
+MAINTENANCE_SCRIPTS=(
+    deploy.sh
+    rollback.sh
+    backup-db.sh
+    health-check.sh
+    pull-deploy.sh
+    migrate-mosquitto-coexistence.sh
+)
+
+SYSTEMD_UNITS=(
+    veyrasense-backend.service
+    veyrasense-mqtt-worker.service
+    veyrasense-update.service
+    veyrasense-update.timer
+)
+
+log() {
+    echo "[INFO] $*"
+}
+
+die() {
+    echo "[ERROR] $*" >&2
+    exit 1
+}
+
+# ------------------------------------------------------------------------------
+# 2. Validate repository source files before system changes
+# ------------------------------------------------------------------------------
+
+log "Validating repository source files."
+
+[[ -f "${ENV_TEMPLATE}" ]] ||
+    die "Missing environment template: ${ENV_TEMPLATE}"
+
+[[ -f "${NGINX_TEMPLATE}" ]] ||
+    die "Missing Nginx template: ${NGINX_TEMPLATE}"
+
+[[ -d "${SYSTEMD_SRC_DIR}" ]] ||
+    die "Missing systemd directory: ${SYSTEMD_SRC_DIR}"
+
+for file in "${MAINTENANCE_SCRIPTS[@]}"; do
+    [[ -f "${SCRIPT_DIR}/${file}" ]] ||
+        die "Missing maintenance script: ${SCRIPT_DIR}/${file}"
+done
+
+for file in "${SYSTEMD_UNITS[@]}"; do
+    [[ -f "${SYSTEMD_SRC_DIR}/${file}" ]] ||
+        die "Missing systemd unit: ${SYSTEMD_SRC_DIR}/${file}"
+done
+
+# ------------------------------------------------------------------------------
+# 3. Validate shell scripts and systemd units
+# ------------------------------------------------------------------------------
+
+log "Checking shell script syntax."
+
+for file in "${MAINTENANCE_SCRIPTS[@]}"; do
+    bash -n "${SCRIPT_DIR}/${file}" ||
+        die "Shell syntax validation failed: ${file}"
+done
+
+log "Checking systemd unit syntax."
+
+if ! command -v systemd-analyze >/dev/null 2>&1; then
+    die "systemd-analyze is unavailable."
+fi
+
+for file in "${SYSTEMD_UNITS[@]}"; do
+    systemd-analyze verify "${SYSTEMD_SRC_DIR}/${file}" ||
+        die "Systemd unit validation failed: ${file}"
+done
+
+# ------------------------------------------------------------------------------
+# 4. Validate existing Nginx VeyraSense entry
+#
+# Never remove or modify the default Nginx site.
+# Never silently replace an unexpected enabled symlink.
+# ------------------------------------------------------------------------------
+
+if [[ -e "${NGINX_ENABLED}" || -L "${NGINX_ENABLED}" ]]; then
+
+    if [[ ! -L "${NGINX_ENABLED}" ]]; then
+        die "${NGINX_ENABLED} exists but is not a symlink. Inspect manually."
+    fi
+
+    EXISTING_TARGET="$(readlink -f "${NGINX_ENABLED}" || true)"
+    EXPECTED_TARGET="$(readlink -m "${NGINX_AVAILABLE}")"
+
+    [[ "${EXISTING_TARGET}" == "${EXPECTED_TARGET}" ]] ||
+        die "Existing VeyraSense Nginx symlink points to an unexpected target: ${EXISTING_TARGET}"
+fi
+
+log "Source validation completed."
+
+# ------------------------------------------------------------------------------
+# 5. Install system packages
+# ------------------------------------------------------------------------------
+
+log "Updating Debian package lists."
+
+apt-get update
+
+log "Installing required Debian packages."
+
 apt-get install -y --no-install-recommends \
     python3 \
     python3-venv \
@@ -32,133 +163,266 @@ apt-get install -y --no-install-recommends \
     nginx \
     curl \
     git \
-    libffi-dev \
+    ca-certificates \
+    openssh-client \
     build-essential \
-    ca-certificates
+    libffi-dev \
+    libssl-dev \
+    pkg-config \
+    util-linux
 
-# Verify Python version (Debian 13 default is Python 3.13)
-PYTHON_VER=$(python3 --version 2>&1)
-echo "[INFO] Detected system Python: ${PYTHON_VER}"
+PYTHON_VERSION="$(python3 --version)"
+log "System Python: ${PYTHON_VERSION}"
 
-# 2. Create unprivileged system user for sandboxing
-echo "[2/7] Configuring 'veyrasense' service user..."
-if ! id -u veyrasense >/dev/null 2>&1; then
-    useradd -r -s /usr/sbin/nologin -d /var/lib/veyrasense -c "VeyraSense Service User" veyrasense
-    echo "[INFO] Created system user 'veyrasense'."
-else
-    echo "[INFO] User 'veyrasense' already exists."
+# ------------------------------------------------------------------------------
+# 6. Create VeyraSense service account
+# ------------------------------------------------------------------------------
+
+log "Configuring VeyraSense service account."
+
+if ! id veyrasense >/dev/null 2>&1; then
+    useradd -r \
+        -s /usr/sbin/nologin \
+        -d "${DATA_DIR}" \
+        -c "VeyraSense Service User" \
+        veyrasense
 fi
 
-# Add veyrasense to mosquitto group if present
+# Add to mosquitto group only if that group exists.
 if getent group mosquitto >/dev/null 2>&1; then
     usermod -aG mosquitto veyrasense
 fi
 
-# 3. Create persistent directory hierarchy outside release folders
-echo "[3/7] Initializing persistent directory layout..."
-mkdir -p /var/lib/veyrasense/data \
-         /var/lib/veyrasense/backups \
-         /var/lib/veyrasense/models \
-         /var/lib/veyrasense/mosquitto \
-         /var/log/veyrasense \
-         /etc/veyrasense \
-         /opt/veyrasense/releases \
-         /opt/veyrasense/scripts
+# ------------------------------------------------------------------------------
+# 7. Create persistent directories
+#
+# Application data and logs are writable by veyrasense.
+# Deployment code and release directories remain root-owned.
+# ------------------------------------------------------------------------------
 
-# Permissions & Ownership
-chown -R veyrasense:veyrasense /var/lib/veyrasense /var/log/veyrasense /opt/veyrasense
-chmod 0750 /var/lib/veyrasense /var/lib/veyrasense/data /var/lib/veyrasense/backups /var/log/veyrasense
+log "Creating persistent and deployment directories."
 
-# 4. Copy configuration template if not already present
-echo "[4/7] Checking production configuration template..."
-if [[ ! -f /etc/veyrasense/veyrasense.env ]]; then
-    if [[ -f ../veyrasense.env.production.template ]]; then
-        cp ../veyrasense.env.production.template /etc/veyrasense/veyrasense.env
-    elif [[ -f deployment/raspberry-pi/veyrasense.env.production.template ]]; then
-        cp deployment/raspberry-pi/veyrasense.env.production.template /etc/veyrasense/veyrasense.env
-    fi
-    chown veyrasense:veyrasense /etc/veyrasense/veyrasense.env
-    chmod 0600 /etc/veyrasense/veyrasense.env
-    echo "[IMPORTANT] Created /etc/veyrasense/veyrasense.env. Please edit with secure production secrets."
-fi
+install -d -o veyrasense -g veyrasense -m 0750 \
+    "${DATA_DIR}" \
+    "${DATA_DIR}/data" \
+    "${DATA_DIR}/backups" \
+    "${DATA_DIR}/models" \
+    "${LOG_DIR}"
 
-# 5. Configure Mosquitto (Preserve existing broker config and CARES-RX data)
-echo "[5/7] Configuring Mosquitto with coexistence protection..."
-mkdir -p /etc/mosquitto/conf.d
+install -d -o root -g root -m 0755 \
+    "${BASE_INSTALL_DIR}" \
+    "${RELEASES_DIR}" \
+    "${SCRIPTS_DIR}"
 
-# Backup existing Mosquitto configurations before modifying
-if [[ -d /etc/mosquitto && ! -d /var/lib/veyrasense/backups/mosquitto_preinstall ]]; then
-    echo "[INFO] Backing up existing /etc/mosquitto to /var/lib/veyrasense/backups/mosquitto_preinstall..."
-    cp -a /etc/mosquitto /var/lib/veyrasense/backups/mosquitto_preinstall
-fi
+install -d -o root -g root -m 0750 \
+    /etc/veyrasense
 
-MOSQUITTO_CONF_SRC=""
-if [[ -f ../../mosquitto/mosquitto.conf ]]; then
-    MOSQUITTO_CONF_SRC="../../mosquitto/mosquitto.conf"
-elif [[ -f deployment/mosquitto/mosquitto.conf ]]; then
-    MOSQUITTO_CONF_SRC="deployment/mosquitto/mosquitto.conf"
-fi
+# Dedicated persistent Mosquitto configuration directory.
+install -d -o root -g mosquitto -m 0750 \
+    "${DATA_DIR}/mosquitto"
 
-if [[ -n "${MOSQUITTO_CONF_SRC}" ]]; then
-    # Install as non-conflicting drop-in 99-veyrasense.conf
-    cp "${MOSQUITTO_CONF_SRC}" /etc/mosquitto/conf.d/99-veyrasense.conf
-    echo "[INFO] Installed /etc/mosquitto/conf.d/99-veyrasense.conf."
-fi
+# ------------------------------------------------------------------------------
+# 8. Production environment file
+#
+# Preserve existing credentials and settings.
+# New files are created root-owned and readable only by root.
+# ------------------------------------------------------------------------------
 
-# Restart mosquitto safely; if it fails (e.g. duplicate listener in legacy main config), report warning
-if ! systemctl restart mosquitto; then
-    echo "[WARN] Mosquitto restart failed. An existing listener or configuration may be active."
-    echo "[WARN] Existing CARES-RX configurations preserved. Please inspect /etc/mosquitto/conf.d/99-veyrasense.conf."
+log "Checking production environment configuration."
+
+if [[ ! -e "${TARGET_ENV}" ]]; then
+
+    install -o root -g root -m 0600 \
+        "${ENV_TEMPLATE}" "${TARGET_ENV}"
+
+    log "Created environment file from production template."
+
 else
-    systemctl enable mosquitto || true
-    echo "[INFO] Mosquitto broker active."
+
+    log "Existing environment file preserved."
+
+    # Normalize permissions without changing its contents.
+    chown root:root "${TARGET_ENV}"
+    chmod 0600 "${TARGET_ENV}"
 fi
 
-# 6. Configure Nginx
-echo "[6/7] Setting up Nginx reverse proxy..."
-if [[ -f ../nginx/veyrasense.conf ]]; then
-    cp ../nginx/veyrasense.conf /etc/nginx/sites-available/veyrasense.conf
-elif [[ -f deployment/raspberry-pi/nginx/veyrasense.conf ]]; then
-    cp deployment/raspberry-pi/nginx/veyrasense.conf /etc/nginx/sites-available/veyrasense.conf
-fi
-# Disable default nginx site and enable veyrasense
-rm -f /etc/nginx/sites-enabled/default
-ln -sf /etc/nginx/sites-available/veyrasense.conf /etc/nginx/sites-enabled/veyrasense.conf
-nginx -t && systemctl reload nginx || true
+# ------------------------------------------------------------------------------
+# 9. Install Nginx configuration safely
+#
+# Back up an existing VeyraSense site configuration.
+# Restore it if nginx -t fails.
+# ------------------------------------------------------------------------------
 
-# 7. Install deployment scripts and systemd units
-echo "[7/7] Installing scripts and systemd units..."
-# Copy maintenance scripts to /opt/veyrasense/scripts/
-SCRIPT_SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cp "${SCRIPT_SRC_DIR}"/deploy.sh /opt/veyrasense/scripts/
-cp "${SCRIPT_SRC_DIR}"/rollback.sh /opt/veyrasense/scripts/
-cp "${SCRIPT_SRC_DIR}"/backup-db.sh /opt/veyrasense/scripts/
-cp "${SCRIPT_SRC_DIR}"/health-check.sh /opt/veyrasense/scripts/
-cp "${SCRIPT_SRC_DIR}"/pull-deploy.sh /opt/veyrasense/scripts/
-chmod 0755 /opt/veyrasense/scripts/*.sh
-chown -R veyrasense:veyrasense /opt/veyrasense/scripts
+log "Installing VeyraSense Nginx configuration."
 
-# Install systemd units
-SYSTEMD_SRC_DIR=""
-if [[ -d "${SCRIPT_SRC_DIR}/../systemd" ]]; then
-    SYSTEMD_SRC_DIR="${SCRIPT_SRC_DIR}/../systemd"
-elif [[ -d deployment/raspberry-pi/systemd ]]; then
-    SYSTEMD_SRC_DIR="deployment/raspberry-pi/systemd"
+install -d -o root -g root -m 0755 \
+    /etc/nginx/sites-available \
+    /etc/nginx/sites-enabled
+
+NGINX_BACKUP=""
+
+if [[ -f "${NGINX_AVAILABLE}" ]]; then
+
+    NGINX_BACKUP="${NGINX_AVAILABLE}.backup.$(date -u +%Y%m%d_%H%M%S)"
+
+    cp -a "${NGINX_AVAILABLE}" "${NGINX_BACKUP}"
+
+    log "Previous VeyraSense Nginx configuration backed up to ${NGINX_BACKUP}"
 fi
 
-if [[ -n "${SYSTEMD_SRC_DIR}" ]]; then
-    cp "${SYSTEMD_SRC_DIR}"/veyrasense-backend.service /etc/systemd/system/
-    cp "${SYSTEMD_SRC_DIR}"/veyrasense-mqtt-worker.service /etc/systemd/system/
-    cp "${SYSTEMD_SRC_DIR}"/veyrasense-update.service /etc/systemd/system/
-    cp "${SYSTEMD_SRC_DIR}"/veyrasense-update.timer /etc/systemd/system/
-    systemctl daemon-reload
-    systemctl enable veyrasense-backend.service
-    systemctl enable veyrasense-mqtt-worker.service
-    systemctl enable veyrasense-update.timer
-    echo "[INFO] Systemd units registered and enabled."
+NGINX_TEMP="${NGINX_AVAILABLE}.new.$$"
+
+cleanup_nginx_temp() {
+    rm -f "${NGINX_TEMP}"
+}
+
+trap cleanup_nginx_temp EXIT
+
+install -o root -g root -m 0644 \
+    "${NGINX_TEMPLATE}" "${NGINX_TEMP}"
+
+mv -f "${NGINX_TEMP}" "${NGINX_AVAILABLE}"
+
+if [[ ! -e "${NGINX_ENABLED}" && ! -L "${NGINX_ENABLED}" ]]; then
+    ln -s "${NGINX_AVAILABLE}" "${NGINX_ENABLED}"
 fi
+
+if ! nginx -t; then
+
+    echo "[ERROR] New Nginx configuration failed validation." >&2
+
+    if [[ -n "${NGINX_BACKUP}" && -f "${NGINX_BACKUP}" ]]; then
+        cp -a "${NGINX_BACKUP}" "${NGINX_AVAILABLE}"
+        echo "[INFO] Previous VeyraSense Nginx configuration restored." >&2
+    else
+        rm -f "${NGINX_AVAILABLE}"
+        rm -f "${NGINX_ENABLED}"
+        echo "[INFO] Newly installed VeyraSense Nginx configuration removed." >&2
+    fi
+
+    exit 1
+fi
+
+log "Nginx configuration validation passed."
+
+# Reload only after successful validation.
+systemctl reload nginx
+
+# ------------------------------------------------------------------------------
+# 10. Install maintenance scripts
+#
+# Root-owned scripts prevent modification by the application service account.
+# ------------------------------------------------------------------------------
+
+log "Installing VeyraSense maintenance scripts."
+
+for file in "${MAINTENANCE_SCRIPTS[@]}"; do
+
+    install -o root -g root -m 0755 \
+        "${SCRIPT_DIR}/${file}" \
+        "${SCRIPTS_DIR}/${file}"
+
+done
+
+# ------------------------------------------------------------------------------
+# 11. Install systemd unit files
+# ------------------------------------------------------------------------------
+
+log "Installing VeyraSense systemd units."
+
+for file in "${SYSTEMD_UNITS[@]}"; do
+
+    install -o root -g root -m 0644 \
+        "${SYSTEMD_SRC_DIR}/${file}" \
+        "/etc/systemd/system/${file}"
+
+done
+
+systemctl daemon-reload
+
+# ------------------------------------------------------------------------------
+# 12. Keep VeyraSense services stopped and disabled
+#
+# This does not stop or disable CARES-RX or Mosquitto.
+# ------------------------------------------------------------------------------
+
+log "Keeping VeyraSense application services disabled."
+
+for unit in \
+    veyrasense-backend.service \
+    veyrasense-mqtt-worker.service \
+    veyrasense-update.service \
+    veyrasense-update.timer
+do
+
+    systemctl disable --now "${unit}" || {
+        log "Unit ${unit} was already disabled or inactive."
+    }
+
+done
+
+# Confirm application services are stopped.
+for unit in \
+    veyrasense-backend.service \
+    veyrasense-mqtt-worker.service \
+    veyrasense-update.service \
+    veyrasense-update.timer
+do
+
+    if systemctl is-active --quiet "${unit}"; then
+        die "${unit} is unexpectedly active."
+    fi
+
+done
+
+# ------------------------------------------------------------------------------
+# 13. Verify existing Mosquitto service was not stopped
+# ------------------------------------------------------------------------------
+
+if ! systemctl is-active --quiet mosquitto; then
+    log "WARNING: Mosquitto is not currently active. No Mosquitto configuration was changed."
+else
+    log "Existing Mosquitto service remains active."
+fi
+
+# ------------------------------------------------------------------------------
+# 14. Final result
+# ------------------------------------------------------------------------------
 
 echo "======================================================================"
-echo " Prerequisites installation complete."
-echo " Next step: Deploy application release using /opt/veyrasense/scripts/deploy.sh"
+echo " VeyraSense prerequisite installation complete."
+echo ""
+echo " Production environment:"
+echo "   ${TARGET_ENV}"
+echo ""
+echo " Deployment scripts:"
+echo "   ${SCRIPTS_DIR}"
+echo ""
+echo " Persistent application data:"
+echo "   ${DATA_DIR}"
+echo ""
+echo " Persistent application logs:"
+echo "   ${LOG_DIR}"
+echo ""
+echo " Nginx:"
+echo "   VeyraSense site installed and validated."
+echo "   Existing default site was not removed."
+echo ""
+echo " Mosquitto:"
+echo "   Configuration migration was NOT executed."
+echo "   Existing CARES-RX configuration was NOT modified."
+echo ""
+echo " Application services:"
+echo "   Backend:     stopped"
+echo "   MQTT worker: stopped"
+echo "   Update:      stopped"
+echo "   Timer:       stopped"
+echo ""
+echo " Next:"
+echo "   Configure production environment values."
+echo "   Verify GitHub deployment key and API token configuration."
+echo "   Review Mosquitto coexistence migration separately."
+echo "   Deploy VeyraSense before enabling its services."
 echo "======================================================================"
+
+exit 0

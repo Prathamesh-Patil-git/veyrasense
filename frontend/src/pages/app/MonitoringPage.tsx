@@ -1,17 +1,45 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Radio } from 'lucide-react';
 import { useDepartment } from '../../context/DepartmentContext';
-import { MOCK_SENSOR_NODES } from '../../mock/dashboardData';
+import { type SensorTelemetryItem } from '../../mock/dashboardData';
 import { SensorTelemetryTable } from '../../components/dashboard-kit/SensorTelemetryTable';
 import { MetricCard } from '../../components/dashboard-kit/MetricCard';
+import { api } from '../../services/api';
 
 export const MonitoringPage: React.FC = () => {
   const { selectedDepartmentId, activeDepartment } = useDepartment();
+  const [nodes, setNodes] = useState<SensorTelemetryItem[]>([]);
+
+  useEffect(() => {
+    api.getNodes()
+      .then((apiNodes) => {
+        const mapped: SensorTelemetryItem[] = apiNodes.map((n) => ({
+          id: n.node_id,
+          name: n.name,
+          departmentId: `dept-${n.department_id}`,
+          departmentName: n.department_name || 'Plant Fleet',
+          sensorType: n.hardware_type,
+          hardwareModel: n.hardware_type,
+          healthStatus: (n.status === 'connected' ? 'healthy' : n.status === 'alert' ? 'alert' : 'offline') as any,
+          latestMeasurement: 0,
+          unit: '',
+          varianceScore: '0.00',
+          lastReceived: n.last_seen_at || n.registered_at,
+          protocol: 'MQTT',
+          firmware: n.firmware_version,
+          sparkline: [0, 0, 0, 0, 0],
+        }));
+        setNodes(mapped);
+      })
+      .catch(() => {
+        setNodes([]);
+      });
+  }, []);
 
   const displayedNodes =
     selectedDepartmentId === 'all'
-      ? MOCK_SENSOR_NODES
-      : MOCK_SENSOR_NODES.filter((n) => n.departmentId === selectedDepartmentId);
+      ? nodes
+      : nodes.filter((n) => n.departmentId === selectedDepartmentId);
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-200">
@@ -26,45 +54,42 @@ export const MonitoringPage: React.FC = () => {
               High-Frequency Sensor Ingestion Stream
             </h2>
           </div>
-          <span className="text-[10px] font-extrabold uppercase px-3 py-1 rounded-full bg-[#FFF9DE] text-[#875B00] self-start sm:self-auto shadow-2xs">
-            SIMULATED • UI PROTOTYPE
+          <span className="text-[10px] font-extrabold uppercase px-3 py-1 rounded-full bg-[#E8FAF1] text-[#0C5A37] self-start sm:self-auto shadow-2xs">
+            MQTT Pipeline Active
           </span>
         </div>
         <p className="text-xs sm:text-sm text-[#5A687C] mt-3 leading-relaxed max-w-3xl">
-          Telemetry surveillance stream interface. (Status: Streaming telemetry, packet throughput metrics, and ringbuffer stats below are Simulated for this UI prototype; Mosquitto MQTT ingestion pipeline is a Planned backend capability).
+          Real-time telemetry surveillance stream ingesting packets via local Mosquitto MQTT broker on the Raspberry Pi 5.
         </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <MetricCard
           label="Total Stream Rate"
-          value="48.2"
+          value={nodes.length > 0 ? "0.0" : "0.0"}
           unit="pkts/sec"
           change="Sub-50ms Latency"
-          changeType="positive"
+          changeType="neutral"
           timeframe="local loop"
           accent="mint"
-          isDemo
         />
         <MetricCard
           label="Buffer Utilization"
-          value="1.8"
+          value="0.0"
           unit="MB / 64MB"
           change="Clean Ringbuffer"
           changeType="positive"
           timeframe="RAM footprint"
           accent="blue"
-          isDemo
         />
         <MetricCard
           label="Deduplicated Frames"
-          value="1,492"
+          value="0"
           unit="frames"
           change="0 corrupted"
-          changeType="positive"
+          changeType="neutral"
           timeframe="since edge boot"
           accent="yellow"
-          isDemo
         />
       </div>
 

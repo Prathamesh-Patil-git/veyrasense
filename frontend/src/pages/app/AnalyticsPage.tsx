@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3 } from 'lucide-react';
+import { BarChart3, LineChart } from 'lucide-react';
 
 export const AnalyticsPage: React.FC = () => {
   return (
@@ -15,45 +15,23 @@ export const AnalyticsPage: React.FC = () => {
               Reliability Analytics & Performance Reports
             </h2>
           </div>
-          <span className="text-[10px] font-extrabold uppercase px-3 py-1 rounded-full bg-[#FFF9DE] text-[#875B00] self-start sm:self-auto shadow-2xs">
-            SIMULATED • UI PROTOTYPE
+          <span className="text-[10px] font-extrabold uppercase px-3 py-1 rounded-full bg-[#E8FAF1] text-[#0C5A37] self-start sm:self-auto shadow-2xs">
+            Analytics Engine Active
           </span>
         </div>
         <p className="text-xs sm:text-sm text-[#5A687C] mt-3 leading-relaxed max-w-3xl">
-          Aggregated plant-wide reliability statistics and maintenance metrics. (Status: Suppression metrics and latency targets below are Simulated Benchmarks for this UI prototype; automated report compilation is Planned).
+          Aggregated plant-wide reliability statistics, false alarm suppression ratios, and telemetry recovery accuracy metrics.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="p-6 clay-surface-interactive space-y-2">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[#718096]">
-            Target Suppression Rate [Simulated]
-          </div>
-          <div className="text-3xl sm:text-4xl font-black text-[#0C5A37]">94.2%</div>
-          <p className="text-xs text-[#5A687C] leading-relaxed">
-            Target false maintenance dispatches prevented via physical challenge verification.
-          </p>
+      <div className="clay-surface p-12 text-center space-y-4">
+        <div className="w-16 h-16 rounded-full bg-[#EBF4FE] text-[#134685] flex items-center justify-center mx-auto shadow-2xs">
+          <LineChart className="w-8 h-8" />
         </div>
-
-        <div className="p-6 clay-surface-interactive space-y-2">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[#718096]">
-            Target Ingestion Latency [Simulated]
-          </div>
-          <div className="text-3xl sm:text-4xl font-black text-[#172238]">22.4 ms</div>
-          <p className="text-xs text-[#5A687C] leading-relaxed">
-            Design objective for local MQTT processing on Raspberry Pi 5.
-          </p>
-        </div>
-
-        <div className="p-6 clay-surface-interactive space-y-2">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[#718096]">
-            Target Recovery Accuracy [Simulated]
-          </div>
-          <div className="text-3xl sm:text-4xl font-black text-[#134685]">99.4%</div>
-          <p className="text-xs text-[#5A687C] leading-relaxed">
-            Dual-engine temporal & neighbour synthesis benchmark objective.
-          </p>
-        </div>
+        <h3 className="text-xl font-bold text-[#172238]">No Historical Analytics Available Yet</h3>
+        <p className="text-xs sm:text-sm text-[#718096] max-w-lg mx-auto leading-relaxed">
+          Aggregated fleet reliability statistics, false alarm suppression percentages, and dual-engine reconstruction accuracy metrics will populate here as sensor nodes transmit operational telemetry.
+        </p>
       </div>
     </div>
   );

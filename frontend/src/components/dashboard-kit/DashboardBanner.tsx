@@ -8,6 +8,7 @@ export interface DashboardBannerProps {
   subtitle?: string;
   actionLabel?: string;
   actionHref?: string;
+  onActionClick?: () => void | Promise<void>;
   nodeCount?: number;
   healthPercent?: number;
   departmentName?: string;
@@ -18,6 +19,7 @@ export const DashboardBanner: React.FC<DashboardBannerProps> = ({
   subtitle = 'Monitor sensor reliability, investigate suspicious measurements and maintain trusted industrial data.',
   actionLabel = 'View Sensor Network',
   actionHref = '/app/monitoring',
+  onActionClick,
   nodeCount = 16,
   healthPercent = 99.4,
   departmentName = 'All Departments',
@@ -68,17 +70,29 @@ export const DashboardBanner: React.FC<DashboardBannerProps> = ({
             <span className="text-[#0C5A37]">{healthPercent}% Fleet Health</span>
           </div>
 
-          {actionHref && actionLabel && (
-            <Link to={actionHref} className="w-full sm:w-auto">
+          {actionLabel && (
+            actionHref ? (
+              <Link to={actionHref} className="w-full sm:w-auto">
+                <Button
+                  variant="secondary"
+                  size="md"
+                  rightIcon={<ArrowRight className="w-4 h-4 text-[#FFD21C]" />}
+                  className="w-full sm:w-auto"
+                >
+                  {actionLabel}
+                </Button>
+              </Link>
+            ) : onActionClick ? (
               <Button
                 variant="secondary"
                 size="md"
+                onClick={onActionClick}
                 rightIcon={<ArrowRight className="w-4 h-4 text-[#FFD21C]" />}
                 className="w-full sm:w-auto"
               >
                 {actionLabel}
               </Button>
-            </Link>
+            ) : null
           )}
         </div>
       </div>

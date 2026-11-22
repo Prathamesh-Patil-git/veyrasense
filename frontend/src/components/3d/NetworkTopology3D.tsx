@@ -6,7 +6,7 @@ import {
   Info,
   Radio,
 } from 'lucide-react';
-import { MOCK_SENSOR_NODES, type SensorTelemetryItem } from '../../mock/dashboardData';
+import { type SensorTelemetryItem } from '../../mock/dashboardData';
 
 interface NetworkTopology3DProps {
   nodes?: SensorTelemetryItem[];
@@ -16,7 +16,7 @@ interface NetworkTopology3DProps {
 }
 
 export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
-  nodes = MOCK_SENSOR_NODES,
+  nodes = [],
   selectedDepartmentId,
   onSelectNode,
   className = '',
@@ -597,7 +597,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
       ) : (
         <div className="absolute bottom-4 left-4 pointer-events-none z-10 text-[11px] text-slate-400 flex items-center gap-2 bg-[#172238]/70 backdrop-blur-xs px-3 py-1.5 rounded-full border border-[#2B3E63]/60">
           <Info className="w-3.5 h-3.5 text-[#FFD21C]" />
-          <span>Click any 3D node to inspect real-time telemetry • Drag to rotate view</span>
+          <span>{visibleNodes.length > 0 ? 'Click any 3D node to inspect real-time telemetry • Drag to rotate view' : 'Gateway Coordinator Active • 0 Transducers Connected • Drag to rotate view'}</span>
         </div>
       )}
     </div>

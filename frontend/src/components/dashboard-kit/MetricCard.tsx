@@ -12,7 +12,6 @@ export interface MetricCardProps {
   badge?: React.ReactNode;
   accent?: 'yellow' | 'mint' | 'blue' | 'slate';
   sparkline?: number[];
-  isDemo?: boolean;
   className?: string;
 }
 
@@ -27,7 +26,6 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   badge,
   accent = 'mint',
   sparkline = [20, 25, 22, 35, 30, 42, 40, 55],
-  isDemo = true,
   className = '',
 }) => {
   const accentPills = {
@@ -73,11 +71,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
               {label}
             </span>
           </div>
-          {badge || (isDemo && (
-            <span className="text-[9px] font-bold uppercase tracking-wider text-[#875B00] bg-[#FFF9DE] px-2 py-0.5 rounded-full shadow-2xs">
-              Simulated
-            </span>
-          ))}
+          {badge}
         </div>
 
         <div className="flex items-baseline gap-2 mb-3">

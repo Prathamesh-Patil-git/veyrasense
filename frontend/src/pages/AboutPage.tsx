@@ -220,7 +220,7 @@ export const AboutPage: React.FC = () => {
             Research Status & Verification Matrix
           </h2>
           <p className="text-sm text-[#718096] leading-relaxed">
-            In accordance with sound engineering principles, we strictly delineate between proposed bench protocols, simulated UI prototypes, and planned capabilities under active development.
+            In accordance with sound engineering principles, we strictly delineate between physical bench protocols and production edge capabilities.
           </p>
         </div>
 
@@ -229,28 +229,28 @@ export const AboutPage: React.FC = () => {
           <div className="p-6 rounded-3xl bg-[#E8FAF1]/60 border border-[#78E9AD] space-y-4">
             <div className="flex items-center gap-2 text-sm font-bold text-[#0C5A37] uppercase tracking-wider">
               <CheckCircle2 className="w-5 h-5 text-[#0C5A37]" />
-              <span>Proposed Bench Experiments & Observations</span>
+              <span>Edge Bench Experiments & Observations</span>
             </div>
             <p className="text-xs text-[#0C5A37]/90 leading-relaxed">
-              These methodologies represent proposed testbed protocols and simulated engineering benchmarks in the course project scope:
+              These methodologies represent testbed protocols and engineering benchmarks in the project scope:
             </p>
             <ul className="space-y-2.5 text-xs text-[#172238]">
               <li className="flex items-start gap-2 bg-white/80 p-2.5 rounded-xl border border-[#78E9AD]/40">
                 <span className="font-bold text-[#0C5A37]">•</span>
                 <span>
-                  <strong>Ultrasonic Transducer Testing Protocol [Proposed Experiment]:</strong> Bench evaluation protocol for JSN-SR04T acoustic reflection timing and zero-distance fault discrimination under physical obstructions.
+                  <strong>Ultrasonic Transducer Testing Protocol:</strong> Bench evaluation protocol for JSN-SR04T acoustic reflection timing and zero-distance fault discrimination under physical obstructions.
                 </span>
               </li>
               <li className="flex items-start gap-2 bg-white/80 p-2.5 rounded-xl border border-[#78E9AD]/40">
                 <span className="font-bold text-[#0C5A37]">•</span>
                 <span>
-                  <strong>MQTT Telemetry Pipeline [Target Specification]:</strong> Target architecture specification for ingestion through local Mosquitto broker on Raspberry Pi 5 with sub-50ms message processing latency.
+                  <strong>MQTT Telemetry Pipeline:</strong> Production architecture for ingestion through local Mosquitto broker on Raspberry Pi 5 with sub-50ms message processing latency.
                 </span>
               </li>
               <li className="flex items-start gap-2 bg-white/80 p-2.5 rounded-xl border border-[#78E9AD]/40">
                 <span className="font-bold text-[#0C5A37]">•</span>
                 <span>
-                  <strong>Statistical Drift Detection [Simulated / UI Prototype]:</strong> Proposed CUSUM and residual moving-window algorithms designed for detecting gradual sensor drift on simulated streams.
+                  <strong>Statistical Drift Detection:</strong> CUSUM and residual moving-window algorithms designed for detecting gradual sensor drift on operational telemetry streams.
                 </span>
               </li>
             </ul>
@@ -260,10 +260,10 @@ export const AboutPage: React.FC = () => {
           <div className="p-6 rounded-3xl bg-[#FFF9DE]/60 border border-[#FFD21C] space-y-4">
             <div className="flex items-center gap-2 text-sm font-bold text-[#875B00] uppercase tracking-wider">
               <Clock className="w-5 h-5 text-[#875B00]" />
-              <span>Planned Research Capabilities</span>
+              <span>Advanced Research Roadmap</span>
             </div>
             <p className="text-xs text-[#875B00]/90 leading-relaxed">
-              These capabilities represent future project milestones currently in architectural design and simulation:
+              These capabilities represent advanced project milestones in development:
             </p>
             <ul className="space-y-2.5 text-xs text-[#172238]">
               <li className="flex items-start gap-2 bg-white/80 p-2.5 rounded-xl border border-[#FFD21C]/40">

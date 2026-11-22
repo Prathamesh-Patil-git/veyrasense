@@ -58,42 +58,52 @@ export const RecentActivityFeed: React.FC<RecentActivityFeedProps> = ({ events }
           </p>
         </div>
 
-        <span className="text-[10px] font-bold text-[#875B00] bg-[#FFF9DE] px-2.5 py-1 rounded-full shadow-2xs">
-          Simulated Feed
+        <span className="text-[10px] font-bold text-[#0C5A37] bg-[#E8FAF1] px-2.5 py-1 rounded-full shadow-2xs">
+          Live Operational Audit
         </span>
       </div>
 
-      <div className="space-y-3">
-        {events.map((event) => (
-          <div
-            key={event.id}
-            className="flex items-start gap-3.5 p-3.5 rounded-2xl hover:bg-[#F7F7F0] transition-colors"
-          >
-            {getEventIcon(event.type)}
+      {events.length === 0 ? (
+        <div className="py-8 text-center text-[#718096] text-xs space-y-1.5">
+          <Clock className="w-5 h-5 text-[#A0AEC0] mx-auto opacity-60" />
+          <p className="font-bold text-[#172238]">No Operational Activity Recorded</p>
+          <p className="text-[11px] max-w-sm mx-auto text-[#718096]">
+            Audit logs, transducer status changes, and recovery events will appear here automatically as nodes transmit.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {events.map((event) => (
+            <div
+              key={event.id}
+              className="flex items-start gap-3.5 p-3.5 rounded-2xl hover:bg-[#F7F7F0] transition-colors"
+            >
+              {getEventIcon(event.type)}
 
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-bold text-[#172238] truncate">
-                  {event.title}
-                </span>
-                <span className="text-[11px] font-medium text-[#718096] shrink-0">
-                  {event.timestamp}
-                </span>
-              </div>
-              <p className="text-xs text-[#5A687C] mt-0.5 leading-relaxed">
-                {event.description}
-              </p>
-              <div className="flex items-center gap-2 mt-1.5 text-[10px] font-mono text-[#718096]">
-                <span className="px-2 py-0.5 rounded-md bg-[#EEEFEA] font-semibold text-[#172238]">
-                  {event.nodeId}
-                </span>
-                <span>•</span>
-                <span>{event.departmentName}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-[#172238] truncate">
+                    {event.title}
+                  </span>
+                  <span className="text-[11px] font-medium text-[#718096] shrink-0">
+                    {event.timestamp}
+                  </span>
+                </div>
+                <p className="text-xs text-[#5A687C] mt-0.5 leading-relaxed">
+                  {event.description}
+                </p>
+                <div className="flex items-center gap-2 mt-1.5 text-[10px] font-mono text-[#718096]">
+                  <span className="px-2 py-0.5 rounded-md bg-[#EEEFEA] font-semibold text-[#172238]">
+                    {event.nodeId}
+                  </span>
+                  <span>•</span>
+                  <span>{event.departmentName}</span>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

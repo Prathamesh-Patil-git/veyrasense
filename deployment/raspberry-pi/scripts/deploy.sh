@@ -1,191 +1,590 @@
+
 #!/usr/bin/env bash
 # ==============================================================================
-# VeyraSense — Atomic Production Release Deployment Script
-# Target: Raspberry Pi 5 (Debian 13 Trixie ARM64)
+# VeyraSense — Atomic Production Release Deployment
+# Target: Raspberry Pi 5 / Debian 13 ARM64
+#
 # Features:
-# - Deployment lock via flock to prevent concurrent executions
-# - Safe separation: persistent DB, secrets, and ML models never overwritten
-# - Mandatory pre-migration SQLite backup with WAL consistency
-# - Automatic database rollback (with stale WAL purging) if migration fails
-# - Zero-downtime atomic symlink switching (/opt/veyrasense/current)
-# - Post-deployment health verification with automatic rollback
-# - Retains previous 3 releases for safe rollbacks
+# - One deployment lock, owned by pull-deploy.sh or this script
+# - Atomic release creation and symlink promotion
+# - Per-release Python virtual environment
+# - Correct frontend build and staging
+# - SQLite backup before migration
+# - Application services stopped during migration
+# - Automatic rollback of release and database on failure
+# - Health verification before accepting deployment
+# - Preserves active and previous releases
+# - Persistent application data remains outside release directories
+#
+# Usage:
+#   sudo bash deploy.sh /path/to/staged/repository
+#
+# The caller may set DEPLOY_LOCK_HELD=1 if it already owns the deployment lock.
 # ==============================================================================
 
-set -euo pipefail
+set -Eeuo pipefail
+
+# ------------------------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 BASE_INSTALL_DIR="/opt/veyrasense"
 RELEASES_DIR="${BASE_INSTALL_DIR}/releases"
 CURRENT_LINK="${BASE_INSTALL_DIR}/current"
+
 DATA_DIR="/var/lib/veyrasense/data"
 BACKUPS_DIR="/var/lib/veyrasense/backups"
-ENV_FILE="/etc/veyrasense/veyrasense.env"
-SOURCE_ROOT="${1:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 
-# Acquire deployment lock
-LOCK_DIR="/run/lock"
-if [[ ! -d "${LOCK_DIR}" ]]; then
-    LOCK_DIR="/tmp"
-fi
-LOCK_FILE="${LOCK_DIR}/veyrasense-deploy.lock"
-exec 200>"${LOCK_FILE}"
-if ! flock -n 200; then
-    echo "[ERROR] Another deployment process is currently running. Exiting to prevent race condition." >&2
+ENV_FILE="/etc/veyrasense/veyrasense.env"
+DB_FILE="${DATA_DIR}/veyrasense.db"
+
+BACKEND_SERVICE="veyrasense-backend.service"
+MQTT_SERVICE="veyrasense-mqtt-worker.service"
+UPDATE_TIMER="veyrasense-update.timer"
+
+SOURCE_ROOT="${1:-}"
+
+# ------------------------------------------------------------------------------
+# Root check
+# ------------------------------------------------------------------------------
+
+if [[ "${EUID}" -ne 0 ]]; then
+    echo "[ERROR] deploy.sh must run as root." >&2
     exit 1
 fi
 
-TIMESTAMP=$(date -u +"%Y%m%d_%H%M%S")
+# ------------------------------------------------------------------------------
+# Deployment lock
+#
+# pull-deploy.sh owns the lock when it launches this script.
+# Direct/manual invocations acquire it here.
+# ------------------------------------------------------------------------------
+
+LOCK_FILE="/run/lock/veyrasense-deploy.lock"
+mkdir -p "$(dirname "${LOCK_FILE}")"
+
+if [[ "${DEPLOY_LOCK_HELD:-0}" != "1" ]]; then
+    exec 200>"${LOCK_FILE}"
+
+    if ! flock -n 200; then
+        echo "[ERROR] Another deployment or rollback is running." >&2
+        exit 1
+    fi
+fi
+
+# ------------------------------------------------------------------------------
+# Validate source
+# ------------------------------------------------------------------------------
+
+if [[ -z "${SOURCE_ROOT}" ]]; then
+    echo "[ERROR] Source repository path is required." >&2
+    echo "Usage: sudo bash deploy.sh /path/to/staged/repository" >&2
+    exit 1
+fi
+
+SOURCE_ROOT="$(readlink -f "${SOURCE_ROOT}")"
+
+if [[ ! -d "${SOURCE_ROOT}/backend" ]]; then
+    echo "[ERROR] Backend source directory is missing." >&2
+    exit 1
+fi
+
+if [[ ! -f "${SOURCE_ROOT}/backend/requirements.txt" ]]; then
+    echo "[ERROR] backend/requirements.txt is missing." >&2
+    exit 1
+fi
+
+if [[ ! -f "${SOURCE_ROOT}/backend/alembic.ini" ]]; then
+    echo "[ERROR] backend/alembic.ini is missing." >&2
+    exit 1
+fi
+
+if [[ ! -d "${SOURCE_ROOT}/frontend" ]]; then
+    echo "[ERROR] Frontend source directory is missing." >&2
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
+# Required commands
+# ------------------------------------------------------------------------------
+
+for cmd in python3 systemctl sqlite3 curl flock; do
+    if ! command -v "${cmd}" >/dev/null 2>&1; then
+        echo "[ERROR] Required command not found: ${cmd}" >&2
+        exit 1
+    fi
+done
+
+# ------------------------------------------------------------------------------
+# Persistent directory preparation
+# ------------------------------------------------------------------------------
+
+mkdir -p \
+    "${RELEASES_DIR}" \
+    "${DATA_DIR}" \
+    "${BACKUPS_DIR}"
+
+# ------------------------------------------------------------------------------
+# Deployment state
+# ------------------------------------------------------------------------------
+
+TIMESTAMP="$(date -u +"%Y%m%d_%H%M%S")"
 RELEASE_TAG="release_${TIMESTAMP}"
 TARGET_RELEASE_DIR="${RELEASES_DIR}/${RELEASE_TAG}"
 
-echo "======================================================================"
-echo " VeyraSense Production Deployment: ${RELEASE_TAG}"
-echo " Source: ${SOURCE_ROOT}"
-echo " Target: ${TARGET_RELEASE_DIR}"
-echo "======================================================================"
+PREVIOUS_RELEASE=""
+PREVIOUS_DB_EXISTED=0
+BACKUP_FILE=""
 
-# Require root or sudo
-if [[ $EUID -ne 0 ]]; then
-   echo "[ERROR] deploy.sh must be executed with root/sudo privileges." >&2
-   exit 1
+BACKEND_WAS_ACTIVE=0
+MQTT_WAS_ACTIVE=0
+NGINX_WAS_ACTIVE=0
+UPDATE_TIMER_WAS_ACTIVE=0
+
+RELEASE_PROMOTED=0
+MIGRATION_STARTED=0
+DEPLOYMENT_SUCCEEDED=0
+ROLLBACK_IN_PROGRESS=0
+
+# ------------------------------------------------------------------------------
+# Record original release and service states
+# ------------------------------------------------------------------------------
+
+if [[ -L "${CURRENT_LINK}" ]]; then
+    PREVIOUS_RELEASE="$(readlink -f "${CURRENT_LINK}" || true)"
 fi
 
-mkdir -p "${RELEASES_DIR}" "${DATA_DIR}" "${BACKUPS_DIR}"
+systemctl is-active --quiet "${BACKEND_SERVICE}" && BACKEND_WAS_ACTIVE=1 || true
+systemctl is-active --quiet "${MQTT_SERVICE}" && MQTT_WAS_ACTIVE=1 || true
+systemctl is-active --quiet nginx && NGINX_WAS_ACTIVE=1 || true
+systemctl is-active --quiet "${UPDATE_TIMER}" && UPDATE_TIMER_WAS_ACTIVE=1 || true
 
-# 1. Stage Source Code into Target Release Directory
-echo "[1/8] Staging release files into ${TARGET_RELEASE_DIR}..."
-mkdir -p "${TARGET_RELEASE_DIR}"
-cp -a "${SOURCE_ROOT}/backend" "${TARGET_RELEASE_DIR}/"
-cp -a "${SOURCE_ROOT}/deployment" "${TARGET_RELEASE_DIR}/"
-
-# Ensure local development database, local .env, and caches are purged from release
-rm -rf "${TARGET_RELEASE_DIR}/backend/data" \
-       "${TARGET_RELEASE_DIR}/backend/.env" \
-       "${TARGET_RELEASE_DIR}/backend/__pycache__"
-
-# Copy frontend (pre-built dist or source)
-mkdir -p "${TARGET_RELEASE_DIR}/frontend"
-if [[ -d "${SOURCE_ROOT}/frontend/dist" ]]; then
-    echo "[INFO] Using pre-built frontend distribution."
-    cp -a "${SOURCE_ROOT}/frontend/dist" "${TARGET_RELEASE_DIR}/frontend/"
-else
-    echo "[INFO] Pre-built frontend not found. Copying frontend source..."
-    cp -a "${SOURCE_ROOT}/frontend" "${TARGET_RELEASE_DIR}/"
+if [[ -f "${DB_FILE}" ]]; then
+    PREVIOUS_DB_EXISTED=1
 fi
 
-# 2. Build / Update Python Virtual Environment (Debian 13 Python 3.13+)
-echo "[2/8] Configuring Python virtual environment..."
-VENV_PATH="${TARGET_RELEASE_DIR}/backend/.venv"
-python3 -m venv "${VENV_PATH}"
-"${VENV_PATH}/bin/pip" install --upgrade pip setuptools wheel
-"${VENV_PATH}/bin/pip" install --no-cache-dir -r "${TARGET_RELEASE_DIR}/backend/requirements.txt"
+echo "======================================================================"
+echo " VeyraSense Production Deployment"
+echo " Release: ${RELEASE_TAG}"
+echo " Source:  ${SOURCE_ROOT}"
+echo " Previous release: ${PREVIOUS_RELEASE:-none}"
+echo "======================================================================"
 
-# 3. Build Frontend if dist is missing
-if [[ ! -d "${TARGET_RELEASE_DIR}/frontend/dist" && -f "${TARGET_RELEASE_DIR}/frontend/package.json" ]]; then
-    echo "[3/8] Building frontend with Node.js..."
-    if command -v npm >/dev/null 2>&1; then
-        (cd "${TARGET_RELEASE_DIR}/frontend" && npm ci && npm run build)
+# ------------------------------------------------------------------------------
+# Rollback handler
+# ------------------------------------------------------------------------------
+
+rollback_deployment() {
+
+    if [[ "${ROLLBACK_IN_PROGRESS}" -eq 1 ]]; then
+        return
+    fi
+
+    ROLLBACK_IN_PROGRESS=1
+
+    echo ""
+    echo "[ROLLBACK] Deployment failed. Beginning automatic recovery." >&2
+
+    # Stop application processes before touching SQLite.
+    systemctl stop "${MQTT_SERVICE}" >/dev/null 2>&1 || true
+    systemctl stop "${BACKEND_SERVICE}" >/dev/null 2>&1 || true
+
+    # Restore previous database state if migration had started.
+    if [[ "${MIGRATION_STARTED}" -eq 1 ]]; then
+
+        if [[ "${PREVIOUS_DB_EXISTED}" -eq 1 ]]; then
+
+            if [[ -n "${BACKUP_FILE}" && -f "${BACKUP_FILE}" ]]; then
+
+                echo "[ROLLBACK] Restoring pre-migration database backup."
+
+                RESTORE_TEMP="${DB_FILE}.restore.tmp"
+
+                if cp -- "${BACKUP_FILE}" "${RESTORE_TEMP}" &&
+                    sqlite3 "${RESTORE_TEMP}" 'PRAGMA quick_check;' 2>/dev/null |
+                    grep -qx "ok"; then
+
+                    chown veyrasense:veyrasense "${RESTORE_TEMP}"
+                    chmod 0640 "${RESTORE_TEMP}"
+
+                    rm -f "${DB_FILE}-wal" "${DB_FILE}-shm"
+
+                    mv -f "${RESTORE_TEMP}" "${DB_FILE}"
+
+                    echo "[ROLLBACK] Database restored successfully."
+                else
+                    rm -f "${RESTORE_TEMP}"
+                    echo "[ROLLBACK-CRITICAL] Database backup restoration failed." >&2
+                fi
+
+            else
+                echo "[ROLLBACK-CRITICAL] Pre-migration backup is missing." >&2
+            fi
+
+        else
+            # The database did not exist before deployment.
+            # Remove a newly created database after stopping services.
+            echo "[ROLLBACK] Removing database created by failed initial migration."
+            rm -f "${DB_FILE}" "${DB_FILE}-wal" "${DB_FILE}-shm"
+        fi
+    fi
+
+    # Restore previous release symlink.
+    if [[ -n "${PREVIOUS_RELEASE}" && -d "${PREVIOUS_RELEASE}" ]]; then
+
+        echo "[ROLLBACK] Restoring previous release: ${PREVIOUS_RELEASE}"
+
+        TEMP_LINK="${BASE_INSTALL_DIR}/current.rollback.$$"
+
+        rm -f "${TEMP_LINK}"
+
+        if ln -s "${PREVIOUS_RELEASE}" "${TEMP_LINK}" &&
+            mv -Tf "${TEMP_LINK}" "${CURRENT_LINK}"; then
+
+            echo "[ROLLBACK] Previous release restored."
+        else
+            echo "[ROLLBACK-CRITICAL] Failed to restore previous release symlink." >&2
+        fi
+
+    elif [[ "${RELEASE_PROMOTED}" -eq 1 ]]; then
+
+        echo "[ROLLBACK-WARN] No previous release was available." >&2
+        rm -f "${CURRENT_LINK}"
+    fi
+
+    # Restore service running states.
+    if [[ "${BACKEND_WAS_ACTIVE}" -eq 1 ]]; then
+        systemctl start "${BACKEND_SERVICE}" || \
+            echo "[ROLLBACK-ERROR] Backend failed to restart." >&2
+    fi
+
+    if [[ "${MQTT_WAS_ACTIVE}" -eq 1 ]]; then
+        systemctl start "${MQTT_SERVICE}" || \
+            echo "[ROLLBACK-ERROR] MQTT worker failed to restart." >&2
+    fi
+
+    if [[ "${NGINX_WAS_ACTIVE}" -eq 1 ]]; then
+        systemctl reload nginx || \
+            echo "[ROLLBACK-WARN] Nginx reload failed." >&2
+    fi
+
+    if [[ "${UPDATE_TIMER_WAS_ACTIVE}" -eq 1 ]]; then
+        systemctl start "${UPDATE_TIMER}" || true
     else
-        echo "[ERROR] Node.js/npm not found and frontend dist is missing!" >&2
-        rm -rf "${TARGET_RELEASE_DIR}"
+        systemctl stop "${UPDATE_TIMER}" >/dev/null 2>&1 || true
+    fi
+
+    # Remove failed release only after restoring the old release.
+    if [[ -d "${TARGET_RELEASE_DIR}" &&
+          "${TARGET_RELEASE_DIR}" != "${PREVIOUS_RELEASE}" ]]; then
+        rm -rf -- "${TARGET_RELEASE_DIR}"
+    fi
+
+    echo "[ROLLBACK] Recovery procedure finished." >&2
+}
+
+on_error() {
+    local exit_code=$?
+    trap - ERR
+
+    if [[ "${DEPLOYMENT_SUCCEEDED}" -ne 1 ]]; then
+        rollback_deployment
+    fi
+
+    exit "${exit_code}"
+}
+
+trap on_error ERR
+
+# ------------------------------------------------------------------------------
+# 1. Create release staging directory
+# ------------------------------------------------------------------------------
+
+echo "[1/9] Preparing release directory."
+
+mkdir -p "${TARGET_RELEASE_DIR}"
+
+# Copy backend source.
+cp -a "${SOURCE_ROOT}/backend" "${TARGET_RELEASE_DIR}/"
+
+# Remove development-only files and local state.
+rm -rf \
+    "${TARGET_RELEASE_DIR}/backend/data" \
+    "${TARGET_RELEASE_DIR}/backend/.env" \
+    "${TARGET_RELEASE_DIR}/backend/.venv" \
+    "${TARGET_RELEASE_DIR}/backend/__pycache__"
+
+# Copy frontend source without creating nested frontend/frontend.
+mkdir -p "${TARGET_RELEASE_DIR}/frontend"
+
+cp -a "${SOURCE_ROOT}/frontend/." "${TARGET_RELEASE_DIR}/frontend/"
+
+# Copy deployment metadata and other versioned resources.
+if [[ -d "${SOURCE_ROOT}/deployment" ]]; then
+    cp -a "${SOURCE_ROOT}/deployment" "${TARGET_RELEASE_DIR}/"
+fi
+
+# Record target commit.
+if [[ -d "${SOURCE_ROOT}/.git" ]]; then
+
+    git -C "${SOURCE_ROOT}" rev-parse HEAD \
+        > "${TARGET_RELEASE_DIR}/backend/.git_commit"
+
+elif [[ -f "${SOURCE_ROOT}/backend/.git_commit" ]]; then
+
+    cp -f \
+        "${SOURCE_ROOT}/backend/.git_commit" \
+        "${TARGET_RELEASE_DIR}/backend/.git_commit"
+fi
+
+# ------------------------------------------------------------------------------
+# 2. Create Python virtual environment
+# ------------------------------------------------------------------------------
+
+echo "[2/9] Building Python environment."
+
+python3 -m venv "${TARGET_RELEASE_DIR}/backend/.venv"
+
+"${TARGET_RELEASE_DIR}/backend/.venv/bin/python" -m pip install \
+    --upgrade pip setuptools wheel
+
+"${TARGET_RELEASE_DIR}/backend/.venv/bin/python" -m pip install \
+    --no-cache-dir \
+    -r "${TARGET_RELEASE_DIR}/backend/requirements.txt"
+
+# ------------------------------------------------------------------------------
+# 3. Build or verify frontend
+# ------------------------------------------------------------------------------
+
+echo "[3/9] Building frontend."
+
+if [[ -f "${TARGET_RELEASE_DIR}/frontend/dist/index.html" ]]; then
+
+    echo "[INFO] Existing frontend production build found."
+
+else
+
+    if [[ ! -f "${TARGET_RELEASE_DIR}/frontend/package.json" ]]; then
+        echo "[ERROR] Frontend package.json is missing." >&2
         exit 1
     fi
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "[ERROR] npm is required because frontend/dist is missing." >&2
+        exit 1
+    fi
+
+    if [[ ! -f "${TARGET_RELEASE_DIR}/frontend/package-lock.json" ]]; then
+        echo "[ERROR] package-lock.json is required for reproducible npm ci." >&2
+        exit 1
+    fi
+
+    (
+        cd "${TARGET_RELEASE_DIR}/frontend"
+        npm ci
+        npm run build
+    )
+
+fi
+
+if [[ ! -f "${TARGET_RELEASE_DIR}/frontend/dist/index.html" ]]; then
+    echo "[ERROR] Frontend production index.html was not generated." >&2
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
+# 4. Stop application services before database backup and migration
+# ------------------------------------------------------------------------------
+
+echo "[4/9] Stopping application services."
+
+systemctl stop "${MQTT_SERVICE}"
+systemctl stop "${BACKEND_SERVICE}"
+
+# ------------------------------------------------------------------------------
+# 5. Mandatory database backup
+# ------------------------------------------------------------------------------
+
+echo "[5/9] Creating pre-migration SQLite backup."
+
+if [[ -f "${DB_FILE}" ]]; then
+
+    BACKUP_SCRIPT="${SCRIPT_DIR}/backup-db.sh"
+
+    if [[ ! -f "${BACKUP_SCRIPT}" ]]; then
+        echo "[ERROR] backup-db.sh is missing. Cannot safely migrate." >&2
+        exit 1
+    fi
+
+    BACKUP_FILE="$(
+        bash "${BACKUP_SCRIPT}" "${DB_FILE}" "${BACKUPS_DIR}"
+    )"
+
+    if [[ -z "${BACKUP_FILE}" || ! -f "${BACKUP_FILE}" ]]; then
+        echo "[ERROR] SQLite backup was not created." >&2
+        exit 1
+    fi
+
+    BACKUP_CHECK="$(
+        sqlite3 "${BACKUP_FILE}" 'PRAGMA quick_check;' 2>/dev/null
+    )"
+
+    if [[ "${BACKUP_CHECK}" != "ok" ]]; then
+        echo "[ERROR] SQLite backup integrity check failed." >&2
+        exit 1
+    fi
+
+    echo "[INFO] Verified backup: ${BACKUP_FILE}"
+
 else
-    echo "[3/8] Frontend production distribution verified."
+
+    echo "[INFO] No existing database found. Initial database creation expected."
+
 fi
 
-# Record commit hash for deployment verification and duplicate prevention
-if [[ -d "${SOURCE_ROOT}/.git" ]]; then
-    (cd "${SOURCE_ROOT}" && git rev-parse HEAD > "${TARGET_RELEASE_DIR}/backend/.git_commit") 2>/dev/null || true
-elif [[ -f "${SOURCE_ROOT}/backend/.git_commit" ]]; then
-    cp -f "${SOURCE_ROOT}/backend/.git_commit" "${TARGET_RELEASE_DIR}/backend/.git_commit"
-fi
+# ------------------------------------------------------------------------------
+# 6. Apply database migrations
+# ------------------------------------------------------------------------------
 
-# 4. Mandatory Pre-Migration Database Backup
-echo "[4/8] Executing pre-migration database snapshot..."
-LATEST_BACKUP=""
-if [[ -f "${SCRIPT_DIR}/backup-db.sh" ]]; then
-    LATEST_BACKUP=$(bash "${SCRIPT_DIR}/backup-db.sh" "${DATA_DIR}/veyrasense.db" "${BACKUPS_DIR}")
-    echo "[INFO] Captured pre-migration backup: ${LATEST_BACKUP}"
-fi
+echo "[6/9] Applying Alembic migrations."
 
-# 5. Apply Database Migrations (Alembic)
-echo "[5/8] Applying database migrations..."
-set +e
+MIGRATION_STARTED=1
+
 (
     cd "${TARGET_RELEASE_DIR}/backend"
+
+    # Load production environment variables for Alembic.
     if [[ -f "${ENV_FILE}" ]]; then
         set -a
         # shellcheck source=/dev/null
-        source "${ENV_FILE}" 2>/dev/null || true
+        source "${ENV_FILE}"
         set +a
     fi
-    "${VENV_PATH}/bin/alembic" upgrade head
+
+    "${TARGET_RELEASE_DIR}/backend/.venv/bin/alembic" upgrade head
 )
-ALEMBIC_STATUS=$?
-set -e
 
-if [[ ${ALEMBIC_STATUS} -ne 0 ]]; then
-    echo "[CRITICAL-ERROR] Alembic database migration failed with exit code ${ALEMBIC_STATUS}!" >&2
-    if [[ -n "${LATEST_BACKUP}" && -f "${LATEST_BACKUP}" ]]; then
-        echo "[ROLLBACK] Restoring database snapshot from ${LATEST_BACKUP}..."
-        # Purge stale WAL and shared-memory files to prevent corrupt replay
-        rm -f "${DATA_DIR}/veyrasense.db-wal" "${DATA_DIR}/veyrasense.db-shm"
-        cp -f "${LATEST_BACKUP}" "${DATA_DIR}/veyrasense.db"
-        chown veyrasense:veyrasense "${DATA_DIR}/veyrasense.db"
-        chmod 0640 "${DATA_DIR}/veyrasense.db"
-    fi
-    echo "[CLEANUP] Removing unpromoted release directory ${TARGET_RELEASE_DIR}..."
-    rm -rf "${TARGET_RELEASE_DIR}"
-    echo "[ABORT] Deployment aborted. Working release was NOT modified." >&2
-    exit 1
-fi
+echo "[INFO] Database migrations completed."
 
-# Ensure correct file ownership for veyrasense system user
+# ------------------------------------------------------------------------------
+# 7. Promote new release atomically
+# ------------------------------------------------------------------------------
+
+echo "[7/9] Promoting release."
+
 chown -R veyrasense:veyrasense "${TARGET_RELEASE_DIR}"
 
-# 6. Atomic Symlink Swap
-echo "[6/8] Performing atomic symlink swap to ${RELEASE_TAG}..."
-PREVIOUS_RELEASE=""
-if [[ -L "${CURRENT_LINK}" ]]; then
-    PREVIOUS_RELEASE=$(readlink -f "${CURRENT_LINK}")
-fi
+TEMP_LINK="${BASE_INSTALL_DIR}/current.next.$$"
 
-ln -sfn "${TARGET_RELEASE_DIR}" "${BASE_INSTALL_DIR}/current_next"
-mv -T "${BASE_INSTALL_DIR}/current_next" "${CURRENT_LINK}"
-echo "[INFO] ${CURRENT_LINK} now points to ${TARGET_RELEASE_DIR}."
+rm -f "${TEMP_LINK}"
 
-# 7. Restart Application Services
-echo "[7/8] Restarting application daemons..."
-systemctl restart veyrasense-backend.service || true
-systemctl restart veyrasense-mqtt-worker.service || true
-systemctl reload nginx || true
+ln -s "${TARGET_RELEASE_DIR}" "${TEMP_LINK}"
+mv -Tf "${TEMP_LINK}" "${CURRENT_LINK}"
 
-# 8. Automated Post-Deployment Health Verification
-echo "[8/8] Verifying gateway health check..."
-set +e
-bash "${SCRIPT_DIR}/health-check.sh"
-HEALTH_STATUS=$?
-set -e
+RELEASE_PROMOTED=1
 
-if [[ ${HEALTH_STATUS} -ne 0 ]]; then
-    echo "[CRITICAL-FAIL] Health check failed after deployment!" >&2
-    echo "[AUTO-ROLLBACK] Rolling back to previous release..."
-    if [[ -n "${PREVIOUS_RELEASE}" && -d "${PREVIOUS_RELEASE}" ]]; then
-        bash "${SCRIPT_DIR}/rollback.sh" "${PREVIOUS_RELEASE}"
-    else
-        echo "[ERROR] No previous release found to roll back to!" >&2
-    fi
+if [[ "$(readlink -f "${CURRENT_LINK}")" != "${TARGET_RELEASE_DIR}" ]]; then
+    echo "[ERROR] Release symlink verification failed." >&2
     exit 1
 fi
 
-# Prune older releases (Keep last 3)
-echo "[INFO] Pruning obsolete releases (retaining 3 most recent)..."
-ls -1dt "${RELEASES_DIR}"/release_* 2>/dev/null | tail -n +4 | xargs -r rm -rf
+# ------------------------------------------------------------------------------
+# 8. Start services and perform health verification
+# ------------------------------------------------------------------------------
 
+echo "[8/9] Starting application services."
+
+systemctl start "${BACKEND_SERVICE}"
+systemctl start "${MQTT_SERVICE}"
+
+if ! systemctl is-active --quiet "${BACKEND_SERVICE}"; then
+    echo "[ERROR] Backend did not become active." >&2
+    exit 1
+fi
+
+if ! systemctl is-active --quiet "${MQTT_SERVICE}"; then
+    echo "[ERROR] MQTT worker did not become active." >&2
+    exit 1
+fi
+
+if [[ "${NGINX_WAS_ACTIVE}" -eq 1 ]]; then
+    systemctl reload nginx
+fi
+
+HEALTH_SCRIPT="${SCRIPT_DIR}/health-check.sh"
+
+if [[ ! -f "${HEALTH_SCRIPT}" ]]; then
+    echo "[ERROR] health-check.sh is missing." >&2
+    exit 1
+fi
+
+bash "${HEALTH_SCRIPT}"
+
+# ------------------------------------------------------------------------------
+# 9. Enable services and retain previous releases
+# ------------------------------------------------------------------------------
+
+echo "[9/9] Finalizing deployment."
+
+systemctl enable "${BACKEND_SERVICE}"
+systemctl enable "${MQTT_SERVICE}"
+
+# Enable timer only after successful deployment.
+systemctl enable "${UPDATE_TIMER}"
+systemctl start "${UPDATE_TIMER}"
+
+# ------------------------------------------------------------------------------
+# Retain active and previous release
+# ------------------------------------------------------------------------------
+
+echo "[INFO] Pruning obsolete releases."
+
+mapfile -t ALL_RELEASES < <(
+    find "${RELEASES_DIR}" \
+        -mindepth 1 \
+        -maxdepth 1 \
+        -type d \
+        -name 'release_*' \
+        -printf '%T@ %p\n' |
+    sort -nr |
+    cut -d' ' -f2-
+)
+
+KEPT=0
+
+for RELEASE in "${ALL_RELEASES[@]}"; do
+
+    RESOLVED="$(readlink -f "${RELEASE}" || true)"
+
+    if [[ "${RESOLVED}" == "${TARGET_RELEASE_DIR}" ||
+          "${RESOLVED}" == "${PREVIOUS_RELEASE}" ]]; then
+        continue
+    fi
+
+    KEPT=$((KEPT + 1))
+
+    # Keep one additional recent release besides active and previous.
+    if [[ "${KEPT}" -gt 1 ]]; then
+        echo "[INFO] Removing obsolete release: ${RELEASE}"
+        rm -rf -- "${RELEASE}"
+    fi
+done
+
+# ------------------------------------------------------------------------------
+# Success
+# ------------------------------------------------------------------------------
+
+DEPLOYMENT_SUCCEEDED=1
+trap - ERR
+
+echo ""
 echo "======================================================================"
-echo " VeyraSense Deployment SUCCESSFUL!"
-echo " Active Release: ${RELEASE_TAG}"
+echo "[DEPLOYMENT-SUCCESS] VeyraSense deployment completed."
+echo "Active release: ${RELEASE_TAG}"
+echo "Commit: $(cat "${TARGET_RELEASE_DIR}/backend/.git_commit" 2>/dev/null || echo unknown)"
+echo "Database backup: ${BACKUP_FILE:-not applicable}"
 echo "======================================================================"
+
 exit 0

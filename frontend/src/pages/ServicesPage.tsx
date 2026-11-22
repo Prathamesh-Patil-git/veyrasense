@@ -167,7 +167,7 @@ export const ServicesPage: React.FC = () => {
         'Turnkey appliance software optimized for Raspberry Pi, industrial edge gateways, and ruggedized IPCs running headless Linux.',
       capabilities: [
         'Containerized Docker & systemd micro-service architecture',
-        'Embedded Mosquitto MQTT broker pre-configured for port 1883',
+        'Embedded Mosquitto MQTT broker pre-configured for port 1884',
         'SQLite local persistence with automated pruning policies',
         'Self-healing watchdog monitors with automatic recovery restart',
       ],

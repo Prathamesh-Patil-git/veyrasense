@@ -1,396 +1,624 @@
+
 #!/usr/bin/env bash
 # ==============================================================================
-# VeyraSense — Secure Pi-Initiated Pull-Based Deployment Runner
+# VeyraSense — Pi-Initiated GitHub Pull Deployment
+# Target: Raspberry Pi 5 / Debian 13 ARM64
 #
-# Production Security Gates & Integrity Enforcement:
-# 1. Origin Integrity: Deploys ONLY from the explicitly configured GitHub repository.
-#    Rejects arbitrary remote URLs and validates git remote config.
-# 2. Branch Restriction: Deploys strictly from the 'main' branch.
-# 3. CI/CD Gate: Gated on successful GitHub Actions CI for the EXACT commit being deployed.
-#    Does not rely only on commit signatures; inspects check-runs conclusion via GitHub API.
-# 4. Commit Authenticity: Validates author, hash, and optional cryptographic GPG/SSH signatures.
-# 5. Duplicate Deployment Prevention: Compares target commit against active release (.git_commit).
-#    Never repeatedly builds or deploys the same commit.
-# 6. Concurrency Locking: Kernel-level flock prevents deployment timer or manual runs from
-#    interrupting an active deployment or corrupting symlink state.
-# 7. Safe Execution: Invokes atomic deploy.sh with pre-migration backup and automatic rollback.
+# Features:
+# - Pinned GitHub repository and main branch
+# - SSH deploy-key authentication
+# - GitHub Actions CI gate for the exact commit
+# - Complete check-run pagination validation
+# - Optional signed-commit enforcement
+# - Duplicate deployment prevention
+# - One deployment lock shared with deploy.sh
+# - Invokes deploy.sh from the exact staged commit
+#
+# Required environment file:
+#   /etc/veyrasense/veyrasense.env
+#
+# Required settings:
+#   REPO_URL=git@github.com:Prathamesh-Patil-git/veyrasense.git
+#   GITHUB_TOKEN=...
+#   GATE_ON_CI=true
+#
+# Deploy key:
+#   /etc/veyrasense/deploy_key
+#
 # ==============================================================================
 
-set -euo pipefail
+set -Eeuo pipefail
+umask 077
 
-# 1. Explicitly Configured Repository and Branch Pinning
+# ------------------------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------------------------
+
 ENV_FILE="/etc/veyrasense/veyrasense.env"
-REPO_URL_CONFIG=$(grep -E '^REPO_URL=' "${ENV_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'" || echo "")
-EXPECTED_REPO_URL="${REPO_URL_CONFIG:-https://github.com/Prathamesh-Patil-git/veyrasense.git}"
-REPO_SLUG=$(echo "${EXPECTED_REPO_URL}" | sed -E 's|https?://github.com/([^/]+/[^/.]+)(\.git)?|\1|')
+
+DEFAULT_REPO_URL="git@github.com:Prathamesh-Patil-git/veyrasense.git"
 BRANCH="main"
+
 CLONE_STAGE_DIR="/var/lib/veyrasense/deploy_cache"
-DEPLOY_SCRIPT="/opt/veyrasense/scripts/deploy.sh"
+
 CURRENT_RELEASE_LINK="/opt/veyrasense/current"
+
 SSH_DEPLOY_KEY="/etc/veyrasense/deploy_key"
 
-# 2. Concurrency Lock Protection
-# Timer executions or concurrent manual triggers will not interrupt an active deployment
-LOCK_DIR="/run/lock"
-if [[ ! -d "${LOCK_DIR}" ]]; then
-    LOCK_DIR="/tmp"
+LOCK_FILE="/run/lock/veyrasense-deploy.lock"
+
+MAX_CI_PAGES=10
+CI_PER_PAGE=100
+
+# ------------------------------------------------------------------------------
+# Root check
+# ------------------------------------------------------------------------------
+
+if [[ "${EUID}" -ne 0 ]]; then
+    echo "[ERROR] pull-deploy.sh must run as root." >&2
+    exit 1
 fi
-LOCK_FILE="${LOCK_DIR}/veyrasense-deploy.lock"
-exec 200>"${LOCK_FILE}"
-if ! flock -n 200; then
-    echo "[CONCURRENCY-LOCK] Another deployment process is currently running. Exiting cleanly without interruption." >&2
-    exit 0
-fi
 
-echo "======================================================================"
-echo " VeyraSense Secure Pull Deployment Runner"
-echo " Time: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
-echo " Configured Origin: ${EXPECTED_REPO_URL}"
-echo " Enforced Branch:   ${BRANCH}"
-echo "======================================================================"
+# ------------------------------------------------------------------------------
+# Read environment values without sourcing the entire environment file
+# ------------------------------------------------------------------------------
 
-# Load environment configuration if available (for GITHUB_TOKEN or policies)
-GATE_ON_CI="true"
-REQUIRE_SIGNED_COMMITS="false"
-GITHUB_TOKEN=""
+read_env_value() {
+    local key="$1"
 
-if [[ -f "${ENV_FILE}" ]]; then
-    # Secure permissions check on env file
-    ENV_PERMS=$(stat -c "%a" "${ENV_FILE}" 2>/dev/null || stat -f "%OLp" "${ENV_FILE}" 2>/dev/null || echo "0600")
-    if [[ "${ENV_PERMS}" != "600" && "${ENV_PERMS}" != "400" ]]; then
-        echo "[SECURITY-WARN] ${ENV_FILE} permissions (${ENV_PERMS}) are too permissive. Enforcing chmod 0600." >&2
-        chmod 0600 "${ENV_FILE}" || true
+    if [[ ! -f "${ENV_FILE}" ]]; then
+        return 0
     fi
 
-    # Read specific deploy tokens without exposing secrets
-    GATE_ON_CI=$(grep -E '^GATE_ON_CI=' "${ENV_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'" || echo "true")
-    REQUIRE_SIGNED_COMMITS=$(grep -E '^REQUIRE_SIGNED_COMMITS=' "${ENV_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'" || echo "false")
-    GITHUB_TOKEN=$(grep -E '^GITHUB_TOKEN=' "${ENV_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'" || echo "")
-fi
+    local value
 
-# Check SSH deploy key permissions if present
-if [[ -f "${SSH_DEPLOY_KEY}" ]]; then
-    KEY_PERMS=$(stat -c "%a" "${SSH_DEPLOY_KEY}" 2>/dev/null || stat -f "%OLp" "${SSH_DEPLOY_KEY}" 2>/dev/null || echo "0400")
-    if [[ "${KEY_PERMS}" != "400" && "${KEY_PERMS}" != "600" ]]; then
-        echo "[SECURITY-WARN] Deploy key ${SSH_DEPLOY_KEY} has insecure permissions (${KEY_PERMS}). Enforcing chmod 0400." >&2
-        chmod 0400 "${SSH_DEPLOY_KEY}" || true
-    fi
-    export GIT_SSH_COMMAND="ssh -i ${SSH_DEPLOY_KEY} -o StrictHostKeyChecking=accept-new"
-fi
+    value="$(
+        grep -m1 -E "^${key}=" "${ENV_FILE}" 2>/dev/null |
+        cut -d '=' -f 2- || true
+    )"
 
-mkdir -p "${CLONE_STAGE_DIR}"
-
-# 3. Repository Synchronization & Origin Validation
-if [[ ! -d "${CLONE_STAGE_DIR}/.git" ]]; then
-    echo "[PULL-DEPLOY] Initializing clean repository cache from ${EXPECTED_REPO_URL}..."
-    git clone --depth 20 --branch "${BRANCH}" "${EXPECTED_REPO_URL}" "${CLONE_STAGE_DIR}"
-    cd "${CLONE_STAGE_DIR}"
-else
-    cd "${CLONE_STAGE_DIR}"
-    # Verify existing remote origin URL strictly matches expected repository
-    CURRENT_ORIGIN=$(git config --get remote.origin.url || true)
-    if [[ "${CURRENT_ORIGIN}" != "${EXPECTED_REPO_URL}" && "${CURRENT_ORIGIN}" != "${EXPECTED_REPO_URL%.git}" ]]; then
-        echo "[SECURITY-ERROR] Staged repository remote origin '${CURRENT_ORIGIN}' does not match expected '${EXPECTED_REPO_URL}'!" >&2
-        echo "[SECURITY-ERROR] Possible origin tampering detected. Resetting origin URL." >&2
-        git remote set-url origin "${EXPECTED_REPO_URL}"
+    # Remove matching surrounding single or double quotes.
+    if [[ "${#value}" -ge 2 ]]; then
+        if [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]] ||
+           [[ "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+            value="${value:1:${#value}-2}"
+        fi
     fi
 
-    echo "[PULL-DEPLOY] Fetching latest commits from origin/${BRANCH}..."
-    git fetch origin "${BRANCH}"
+    printf '%s' "${value}"
+}
+
+REPO_URL="$(read_env_value REPO_URL)"
+REPO_URL="${REPO_URL:-${DEFAULT_REPO_URL}}"
+
+GATE_ON_CI="$(read_env_value GATE_ON_CI)"
+GATE_ON_CI="${GATE_ON_CI:-true}"
+
+REQUIRE_SIGNED_COMMITS="$(read_env_value REQUIRE_SIGNED_COMMITS)"
+REQUIRE_SIGNED_COMMITS="${REQUIRE_SIGNED_COMMITS:-false}"
+
+GITHUB_TOKEN="$(read_env_value GITHUB_TOKEN)"
+
+REQUIRED_CHECKS="$(read_env_value REQUIRED_CI_CHECKS)"
+
+DEFAULT_REQUIRED_CHECKS="Backend Test Suite (Python 3.12),Backend Test Suite (Python 3.13),Frontend Compilation & Production Build,Deployment Scripts Syntax & ShellCheck"
+
+REQUIRED_CHECKS="${REQUIRED_CHECKS:-${DEFAULT_REQUIRED_CHECKS}}"
+
+# ------------------------------------------------------------------------------
+# Validate repository URL and derive GitHub repository slug
+# ------------------------------------------------------------------------------
+
+if [[ ! "${REPO_URL}" =~ ^git@github\.com:([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)(\.git)?$ ]]; then
+    echo "[ERROR] REPO_URL must use the configured GitHub SSH format." >&2
+    echo "[ERROR] Expected: git@github.com:OWNER/REPOSITORY.git" >&2
+    echo "[ERROR] Current value: ${REPO_URL}" >&2
+    exit 1
 fi
 
-# Ensure branch is strictly checked out to 'main'
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-if [[ "${CURRENT_BRANCH}" != "${BRANCH}" ]]; then
-    echo "[PULL-DEPLOY] Switching branch to ${BRANCH}..."
-    git checkout "${BRANCH}"
+REPO_SLUG="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+
+# ------------------------------------------------------------------------------
+# Validate configuration values
+# ------------------------------------------------------------------------------
+
+if [[ "${GATE_ON_CI}" != "true" && "${GATE_ON_CI}" != "false" ]]; then
+    echo "[ERROR] GATE_ON_CI must be true or false." >&2
+    exit 1
 fi
 
-TARGET_COMMIT=$(git rev-parse "origin/${BRANCH}")
-LOCAL_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
-echo "[PULL-DEPLOY] Staged cache current commit: ${LOCAL_COMMIT:0:10}"
-
-# 4. Duplicate Deployment Prevention (Never re-deploy the same commit)
-ACTIVE_DEPLOYED_COMMIT=""
-if [[ -f "${CURRENT_RELEASE_LINK}/backend/.git_commit" ]]; then
-    ACTIVE_DEPLOYED_COMMIT=$(cat "${CURRENT_RELEASE_LINK}/backend/.git_commit" 2>/dev/null || echo "")
+if [[ "${REQUIRE_SIGNED_COMMITS}" != "true" &&
+      "${REQUIRE_SIGNED_COMMITS}" != "false" ]]; then
+    echo "[ERROR] REQUIRE_SIGNED_COMMITS must be true or false." >&2
+    exit 1
 fi
 
-if [[ -n "${ACTIVE_DEPLOYED_COMMIT}" && "${TARGET_COMMIT}" == "${ACTIVE_DEPLOYED_COMMIT}" ]]; then
-    echo "[PULL-DEPLOY] Target commit ${TARGET_COMMIT:0:10} is ALREADY active in production release."
-    echo "[PULL-DEPLOY] System is up-to-date. Skipping redundant deployment."
-    exit 0
+if [[ "${GATE_ON_CI}" == "true" && -z "${GITHUB_TOKEN}" ]]; then
+    echo "[ERROR] GITHUB_TOKEN is required for the private repository CI gate." >&2
+    echo "[ERROR] Configure it in ${ENV_FILE}." >&2
+    exit 1
 fi
 
-echo "[PULL-DEPLOY] Candidate commit identified: ${TARGET_COMMIT}"
-echo "[PULL-DEPLOY] Active production commit:    ${ACTIVE_DEPLOYED_COMMIT:-none}"
+# ------------------------------------------------------------------------------
+# Required commands
+# ------------------------------------------------------------------------------
 
-# Fast-forward cache to target commit
-git reset --hard "${TARGET_COMMIT}"
-
-# 5. Cryptographic Commit Signature Verification
-SIGNATURE_STATUS=$(git log -1 --format="%G?" "${TARGET_COMMIT}" 2>/dev/null || echo "N")
-COMMIT_AUTHOR=$(git log -1 --format="%an <%ae>" "${TARGET_COMMIT}")
-COMMIT_SUBJECT=$(git log -1 --format="%s" "${TARGET_COMMIT}")
-
-echo "[VERIFICATION] Author:    ${COMMIT_AUTHOR}"
-echo "[VERIFICATION] Subject:   ${COMMIT_SUBJECT}"
-echo "[VERIFICATION] Signature: '${SIGNATURE_STATUS}' (G=Good, B=Bad, U=Untrusted, N=None)"
-
-if [[ "${REQUIRE_SIGNED_COMMITS}" == "true" ]]; then
-    if [[ "${SIGNATURE_STATUS}" != "G" ]]; then
-        echo "[SECURITY-ERROR] Target commit does not have a verified cryptographic signature (Status: ${SIGNATURE_STATUS})!" >&2
-        echo "[SECURITY-ERROR] Transport encryption (HTTPS) does NOT replace commit signature verification. Aborting." >&2
+for cmd in git ssh curl python3 flock stat chmod; do
+    if ! command -v "${cmd}" >/dev/null 2>&1; then
+        echo "[ERROR] Required command not found: ${cmd}" >&2
         exit 1
     fi
-    echo "[VERIFICATION-PASS] Commit signature verified."
+done
+
+# ------------------------------------------------------------------------------
+# Deploy key
+# ------------------------------------------------------------------------------
+
+if [[ ! -f "${SSH_DEPLOY_KEY}" ]]; then
+    echo "[ERROR] GitHub deploy key not found: ${SSH_DEPLOY_KEY}" >&2
+    echo "[ERROR] Install the Pi's existing deploy key at this path first." >&2
+    exit 1
 fi
 
-# 6. CI/CD Gate Verification (Gated on successful GitHub Actions CI)
-if [[ "${GATE_ON_CI}" == "true" ]]; then
-    echo "[CI-GATE] Querying GitHub Actions CI status for commit ${TARGET_COMMIT:0:10}..."
+chmod 0400 "${SSH_DEPLOY_KEY}"
 
-    # Define required CI jobs from .github/workflows/ci.yml
-    DEFAULT_REQUIRED_CHECKS="Backend Test Suite (Python 3.12),Backend Test Suite (Python 3.13),Frontend Compilation & Production Build,Deployment Scripts Syntax & ShellCheck"
-    REQUIRED_CHECKS_CONFIG=$(grep -E '^REQUIRED_CI_CHECKS=' "${ENV_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'" || echo "")
-    REQUIRED_CHECKS="${REQUIRED_CHECKS_CONFIG:-${DEFAULT_REQUIRED_CHECKS}}"
+export GIT_SSH_COMMAND="ssh -i ${SSH_DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
 
-    # Secure temporary directory for paginated check-runs responses
-    CI_TEMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'veyrasense_ci.XXXXXX')
-    chmod 0700 "${CI_TEMP_DIR}"
+# ------------------------------------------------------------------------------
+# Concurrency lock
+# ------------------------------------------------------------------------------
 
-    # Ensure temporary responses are cleaned up on script termination
-    clean_ci_temp() {
-        rm -rf "${CI_TEMP_DIR}"
-    }
-    trap clean_ci_temp EXIT
+mkdir -p "$(dirname "${LOCK_FILE}")"
 
-    # Base curl header array - authentication token is passed via header array without logging
-    CURL_BASE_HEADERS=(
-        -H "Accept: application/vnd.github+json"
-        -H "X-GitHub-Api-Version: 2022-11-28"
-        -H "User-Agent: VeyraSense-Deploy-Runner"
-    )
-    CURL_AUTH_ARGS=()
-    if [[ -n "${GITHUB_TOKEN}" ]]; then
-        echo "[CI-GATE] API authentication: configured (Bearer token present)."
-        CURL_AUTH_ARGS=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-    else
-        echo "[CI-GATE] API authentication: unauthenticated (public repository mode)."
+exec 200>"${LOCK_FILE}"
+
+if ! flock -n 200; then
+    echo "[CONCURRENCY-LOCK] Another deployment is already running."
+    echo "[CONCURRENCY-LOCK] Skipping this execution."
+    exit 0
+fi
+
+# ------------------------------------------------------------------------------
+# Header
+# ------------------------------------------------------------------------------
+
+echo "======================================================================"
+echo " VeyraSense Pi-Initiated Pull Deployment"
+echo " Time: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+echo " Repository: ${REPO_SLUG}"
+echo " Branch: ${BRANCH}"
+echo " CI gate: ${GATE_ON_CI}"
+echo "======================================================================"
+
+# ------------------------------------------------------------------------------
+# Prepare staging directory
+# ------------------------------------------------------------------------------
+
+install -d -o root -g root -m 0750 \
+    /var/lib/veyrasense \
+    "${CLONE_STAGE_DIR}"
+
+# ------------------------------------------------------------------------------
+# 1. Clone or validate existing repository cache
+# ------------------------------------------------------------------------------
+
+if [[ ! -d "${CLONE_STAGE_DIR}/.git" ]]; then
+
+    echo "[PULL] Cloning repository."
+
+    git clone \
+        --depth 20 \
+        --single-branch \
+        --branch "${BRANCH}" \
+        "${REPO_URL}" \
+        "${CLONE_STAGE_DIR}"
+
+else
+
+    echo "[PULL] Validating existing repository cache."
+
+    CURRENT_ORIGIN="$(
+        git -C "${CLONE_STAGE_DIR}" config --get remote.origin.url || true
+    )"
+
+    if [[ "${CURRENT_ORIGIN}" != "${REPO_URL}" ]]; then
+        echo "[ERROR] Repository cache origin does not match configured origin." >&2
+        echo "[ERROR] Expected: ${REPO_URL}" >&2
+        echo "[ERROR] Found:    ${CURRENT_ORIGIN}" >&2
+        echo "[ERROR] Inspect the cache before changing its remote." >&2
+        exit 1
     fi
 
-    # Paging loop: fetch all check-runs pages until all runs are retrieved
+    echo "[PULL] Fetching origin/${BRANCH}."
+
+    git -C "${CLONE_STAGE_DIR}" fetch \
+        --prune \
+        --depth 20 \
+        origin \
+        "${BRANCH}"
+
+fi
+
+# ------------------------------------------------------------------------------
+# 2. Resolve exact target commit
+# ------------------------------------------------------------------------------
+
+TARGET_COMMIT="$(
+    git -C "${CLONE_STAGE_DIR}" rev-parse "origin/${BRANCH}"
+)"
+
+if [[ ! "${TARGET_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "[ERROR] Invalid target commit hash." >&2
+    exit 1
+fi
+
+echo "[PULL] Target commit: ${TARGET_COMMIT}"
+
+# ------------------------------------------------------------------------------
+# 3. Check active release for duplicate deployment
+# ------------------------------------------------------------------------------
+
+ACTIVE_DEPLOYED_COMMIT=""
+
+if [[ -f "${CURRENT_RELEASE_LINK}/backend/.git_commit" ]]; then
+    ACTIVE_DEPLOYED_COMMIT="$(
+        cat "${CURRENT_RELEASE_LINK}/backend/.git_commit"
+    )"
+fi
+
+if [[ "${TARGET_COMMIT}" == "${ACTIVE_DEPLOYED_COMMIT}" ]]; then
+    echo "[PULL] Target commit is already active."
+    echo "[PULL] No deployment is necessary."
+    exit 0
+fi
+
+echo "[PULL] Active commit: ${ACTIVE_DEPLOYED_COMMIT:-none}"
+
+# ------------------------------------------------------------------------------
+# 4. Checkout exact commit in staging cache
+# ------------------------------------------------------------------------------
+
+echo "[PULL] Checking out target commit."
+
+git -C "${CLONE_STAGE_DIR}" checkout \
+    --force \
+    -B "${BRANCH}" \
+    "${TARGET_COMMIT}"
+
+CHECKED_OUT_COMMIT="$(
+    git -C "${CLONE_STAGE_DIR}" rev-parse HEAD
+)"
+
+if [[ "${CHECKED_OUT_COMMIT}" != "${TARGET_COMMIT}" ]]; then
+    echo "[ERROR] Staging checkout does not match target commit." >&2
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
+# 5. Optional signed commit verification
+# ------------------------------------------------------------------------------
+
+SIGNATURE_STATUS="$(
+    git -C "${CLONE_STAGE_DIR}" log \
+        -1 \
+        --format="%G?" \
+        "${TARGET_COMMIT}" 2>/dev/null || echo "N"
+)"
+
+COMMIT_AUTHOR="$(
+    git -C "${CLONE_STAGE_DIR}" log \
+        -1 \
+        --format="%an <%ae>" \
+        "${TARGET_COMMIT}"
+)"
+
+COMMIT_SUBJECT="$(
+    git -C "${CLONE_STAGE_DIR}" log \
+        -1 \
+        --format="%s" \
+        "${TARGET_COMMIT}"
+)"
+
+echo "[COMMIT] Author: ${COMMIT_AUTHOR}"
+echo "[COMMIT] Subject: ${COMMIT_SUBJECT}"
+echo "[COMMIT] Signature status: ${SIGNATURE_STATUS}"
+
+if [[ "${REQUIRE_SIGNED_COMMITS}" == "true" &&
+      "${SIGNATURE_STATUS}" != "G" ]]; then
+    echo "[ERROR] Commit signature verification failed or is unavailable." >&2
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
+# 6. GitHub Actions CI gate
+# ------------------------------------------------------------------------------
+
+if [[ "${GATE_ON_CI}" == "true" ]]; then
+
+    echo "[CI] Checking GitHub Actions results for ${TARGET_COMMIT}."
+
+    CI_TEMP_DIR="$(mktemp -d /tmp/veyrasense-ci.XXXXXX)"
+    chmod 0700 "${CI_TEMP_DIR}"
+
+    cleanup_ci() {
+        rm -rf "${CI_TEMP_DIR}"
+    }
+
+    trap cleanup_ci EXIT
+
     PAGE=1
-    PER_PAGE=100
-    MAX_PAGES=10
-    TOTAL_ITEMS_RETRIEVED=0
     TOTAL_COUNT=-1
+    TOTAL_ITEMS=0
 
-    while [[ ${PAGE} -le ${MAX_PAGES} ]]; do
+    while [[ "${PAGE}" -le "${MAX_CI_PAGES}" ]]; do
+
         PAGE_FILE="${CI_TEMP_DIR}/page_${PAGE}.json"
-        CHECK_RUNS_URL="https://api.github.com/repos/${REPO_SLUG}/commits/${TARGET_COMMIT}/check-runs?per_page=${PER_PAGE}&page=${PAGE}"
 
-        HTTP_STATUS=$(curl -s -S -w "%{http_code}" -o "${PAGE_FILE}" \
-            --connect-timeout 10 \
-            --max-time 30 \
-            "${CURL_BASE_HEADERS[@]}" \
-            "${CURL_AUTH_ARGS[@]}" \
-            "${CHECK_RUNS_URL}" 2>/dev/null || echo "000")
+        CHECK_RUNS_URL="https://api.github.com/repos/${REPO_SLUG}/commits/${TARGET_COMMIT}/check-runs?per_page=${CI_PER_PAGE}&page=${PAGE}"
 
-        if [[ "${HTTP_STATUS}" == "000" ]]; then
-            echo "[CI-GATE-FAIL] Network connection failed or timed out reaching GitHub Check Runs API." >&2
-            echo "[CI-GATE-FAIL] Failing closed: cannot verify CI status without API connectivity." >&2
-            exit 1
-        elif [[ "${HTTP_STATUS}" == "401" ]]; then
-            echo "[CI-GATE-FAIL] GitHub API returned HTTP 401 Unauthorized. GITHUB_TOKEN is invalid or expired." >&2
-            exit 1
-        elif [[ "${HTTP_STATUS}" == "403" ]]; then
-            if [[ -z "${GITHUB_TOKEN}" ]]; then
-                echo "[CI-GATE-FAIL] GitHub API returned HTTP 403 Forbidden. Unauthenticated rate limit (60 req/hr) exceeded." >&2
-                echo "[CI-GATE-FAIL] Configure GITHUB_TOKEN in ${ENV_FILE} to authenticate requests." >&2
-            else
-                echo "[CI-GATE-FAIL] GitHub API returned HTTP 403 Forbidden. Token lacks required permissions or rate limit reached." >&2
-            fi
-            exit 1
-        elif [[ "${HTTP_STATUS}" == "404" ]]; then
-            if [[ -z "${GITHUB_TOKEN}" ]]; then
-                echo "[CI-GATE-FAIL] GitHub API returned HTTP 404 Not Found. For private repositories, configure GITHUB_TOKEN in ${ENV_FILE}." >&2
-            else
-                echo "[CI-GATE-FAIL] GitHub API returned HTTP 404 Not Found. Commit ${TARGET_COMMIT:0:10} not found or token lacks repository scope." >&2
-            fi
-            exit 1
-        elif [[ "${HTTP_STATUS}" != "200" ]]; then
-            echo "[CI-GATE-FAIL] GitHub API returned unexpected HTTP status code: ${HTTP_STATUS}." >&2
+        echo "[CI] Retrieving check-runs page ${PAGE}."
+
+        if ! HTTP_STATUS="$(
+            curl -sS \
+                --connect-timeout 10 \
+                --max-time 30 \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                -H "User-Agent: VeyraSense-Deploy-Runner" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -o "${PAGE_FILE}" \
+                -w "%{http_code}" \
+                "${CHECK_RUNS_URL}"
+        )"; then
+            echo "[CI-FAIL] GitHub API connection failed." >&2
             exit 1
         fi
 
-        # Parse page statistics safely
-        PAGE_STATS=$(python3 - "${PAGE_FILE}" << 'PYEOF'
-import sys, json
+        if [[ "${HTTP_STATUS}" != "200" ]]; then
+            echo "[CI-FAIL] GitHub API returned HTTP ${HTTP_STATUS}." >&2
+            echo "[CI-FAIL] Verify GITHUB_TOKEN permissions and repository access." >&2
+            exit 1
+        fi
+
+        PAGE_STATS="$(
+            python3 - "${PAGE_FILE}" <<'PYEOF'
+import json
+import sys
+
 try:
-    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    with open(sys.argv[1], encoding="utf-8") as f:
         data = json.load(f)
-    print(f"{data.get('total_count', 0)} {len(data.get('check_runs', []))}")
-except Exception:
-    print("-1 0")
-PYEOF
-)
-        PAGE_TOTAL=$(echo "${PAGE_STATS}" | awk '{print $1}')
-        PAGE_ITEMS=$(echo "${PAGE_STATS}" | awk '{print $2}')
 
-        if [[ "${PAGE_TOTAL}" -lt 0 ]]; then
-            echo "[CI-GATE-FAIL] Failed to parse JSON response from GitHub Check Runs API on page ${PAGE}." >&2
-            exit 1
-        fi
+    if "total_count" not in data or "check_runs" not in data:
+        raise ValueError("Missing expected API response fields")
+
+    print(data["total_count"], len(data["check_runs"]))
+
+except Exception as exc:
+    print(f"Invalid GitHub API response: {exc}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+        )"
+
+        read -r PAGE_TOTAL PAGE_ITEMS <<< "${PAGE_STATS}"
 
         TOTAL_COUNT="${PAGE_TOTAL}"
-        TOTAL_ITEMS_RETRIEVED=$(( TOTAL_ITEMS_RETRIEVED + PAGE_ITEMS ))
+        TOTAL_ITEMS=$((TOTAL_ITEMS + PAGE_ITEMS))
 
-        if [[ "${PAGE_ITEMS}" -eq 0 || "${TOTAL_ITEMS_RETRIEVED}" -ge "${TOTAL_COUNT}" ]]; then
+        if [[ "${PAGE_ITEMS}" -eq 0 ||
+              "${TOTAL_ITEMS}" -ge "${TOTAL_COUNT}" ]]; then
             break
         fi
 
-        PAGE=$(( PAGE + 1 ))
+        PAGE=$((PAGE + 1))
     done
 
-    # Strict Validation of All Retrieved Check Runs using Python
-    python3 - "${CI_TEMP_DIR}" "${REQUIRED_CHECKS}" << 'PYEOF'
-import sys, os, json
+    if [[ "${TOTAL_ITEMS}" -lt "${TOTAL_COUNT}" ]]; then
+        echo "[CI-FAIL] Pagination incomplete." >&2
+        echo "[CI-FAIL] Retrieved ${TOTAL_ITEMS} of ${TOTAL_COUNT} check runs." >&2
+        echo "[CI-FAIL] Increase MAX_CI_PAGES before deployment." >&2
+        exit 1
+    fi
+
+    # --------------------------------------------------------------------------
+    # Verify exact required checks and all check-run conclusions
+    # --------------------------------------------------------------------------
+
+    python3 - \
+        "${CI_TEMP_DIR}" \
+        "${REQUIRED_CHECKS}" \
+        "${TOTAL_COUNT}" \
+        "${TOTAL_ITEMS}" <<'PYEOF'
+import json
+import os
+import sys
 
 pages_dir = sys.argv[1]
-required_checks_str = sys.argv[2]
-required_checks = [c.strip() for c in required_checks_str.split(",") if c.strip()]
+required_checks = [
+    item.strip()
+    for item in sys.argv[2].split(",")
+    if item.strip()
+]
 
-all_check_runs = []
-total_count = None
+expected_total = int(sys.argv[3])
+retrieved_total = int(sys.argv[4])
+
+if not required_checks:
+    print("[CI-FAIL] No required CI checks are configured.", file=sys.stderr)
+    sys.exit(1)
+
+if retrieved_total != expected_total:
+    print("[CI-FAIL] Incomplete check-run pagination.", file=sys.stderr)
+    sys.exit(1)
 
 page_files = sorted(
-    [os.path.join(pages_dir, f) for f in os.listdir(pages_dir) if f.startswith("page_") and f.endswith(".json")]
+    (
+        os.path.join(pages_dir, name)
+        for name in os.listdir(pages_dir)
+        if name.startswith("page_") and name.endswith(".json")
+    ),
+    key=lambda path: int(os.path.basename(path).split("_")[1].split(".")[0]),
 )
 
-if not page_files:
-    sys.stderr.write("[CI-GATE-FAIL] No API response pages retrieved from GitHub.\n")
+all_runs = []
+
+for path in page_files:
+    with open(path, encoding="utf-8") as file:
+        data = json.load(file)
+    all_runs.extend(data.get("check_runs", []))
+
+if not all_runs:
+    print("[CI-FAIL] No check runs found for the target commit.", file=sys.stderr)
     sys.exit(1)
 
-for pfile in page_files:
-    try:
-        with open(pfile, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        sys.stderr.write(f"[CI-GATE-FAIL] Corrupted JSON response in {os.path.basename(pfile)}: {e}\n")
-        sys.exit(1)
+# Keep the most recently created run for each check name.
+latest = {}
 
-    if total_count is None:
-        total_count = data.get("total_count", 0)
+for run in all_runs:
+    name = run.get("name")
+    if not name:
+        continue
 
-    runs = data.get("check_runs", [])
-    all_check_runs.extend(runs)
+    run_id = run.get("id", 0)
 
-if total_count == 0 or len(all_check_runs) == 0:
-    sys.stderr.write("[CI-GATE-FAIL] Zero check runs found for this commit. CI workflow has not executed.\n")
+    if name not in latest or run_id > latest[name].get("id", 0):
+        latest[name] = run
+
+missing = [name for name in required_checks if name not in latest]
+
+if missing:
+    print("[CI-FAIL] Required checks are missing:", file=sys.stderr)
+    for name in missing:
+        print(f"  - {name}", file=sys.stderr)
     sys.exit(1)
 
-# Group check runs by name, keeping the latest by id if rerun
-latest_runs_by_name = {}
-for r in all_check_runs:
-    name = r.get("name")
-    run_id = r.get("id", 0)
-    if name not in latest_runs_by_name or run_id > latest_runs_by_name[name].get("id", 0):
-        latest_runs_by_name[name] = r
+required_failures = []
 
-# 1. Verify every required check exists
-missing_required = []
-for req in required_checks:
-    if req not in latest_runs_by_name:
-        missing_required.append(req)
+for name in required_checks:
+    run = latest[name]
 
-if missing_required:
-    sys.stderr.write(f"[CI-GATE-FAIL] Missing {len(missing_required)} required CI check(s):\n")
-    for m in missing_required:
-        sys.stderr.write(f"  - MISSING: '{m}'\n")
+    if run.get("status") != "completed":
+        required_failures.append(
+            f"{name}: status={run.get('status')}"
+        )
+    elif run.get("conclusion") != "success":
+        required_failures.append(
+            f"{name}: conclusion={run.get('conclusion')}"
+        )
+
+if required_failures:
+    print("[CI-FAIL] Required CI checks did not all succeed:", file=sys.stderr)
+    for failure in required_failures:
+        print(f"  - {failure}", file=sys.stderr)
     sys.exit(1)
 
-# 2. Inspect required checks for success and unexpected skips
-failed_required = []
-pending_required = []
-skipped_required = []
-passed_required = []
+# Reject failed or still-running checks across the target commit.
+# Informational checks that completed with neutral or skipped conclusions
+# are not automatically treated as failures.
+bad_conclusions = {
+    "failure",
+    "cancelled",
+    "timed_out",
+    "action_required",
+    "startup_failure",
+    "stale",
+}
 
-for req in required_checks:
-    run = latest_runs_by_name[req]
+other_failures = []
+
+for name, run in latest.items():
     status = run.get("status")
     conclusion = run.get("conclusion")
 
     if status != "completed":
-        pending_required.append((req, status))
-    elif conclusion == "skipped":
-        skipped_required.append((req, conclusion))
-    elif conclusion != "success":
-        failed_required.append((req, conclusion))
-    else:
-        passed_required.append(req)
+        other_failures.append(f"{name}: status={status}")
+    elif conclusion in bad_conclusions:
+        other_failures.append(f"{name}: conclusion={conclusion}")
 
-if pending_required:
-    sys.stderr.write(f"[CI-GATE-WAIT] {len(pending_required)} required check(s) still in progress:\n")
-    for req, st in pending_required:
-        sys.stderr.write(f"  - IN PROGRESS: '{req}' (status={st})\n")
+if other_failures:
+    print("[CI-FAIL] Other check runs are pending or unsuccessful:", file=sys.stderr)
+    for failure in other_failures:
+        print(f"  - {failure}", file=sys.stderr)
     sys.exit(1)
 
-if skipped_required:
-    sys.stderr.write(f"[CI-GATE-FAIL] {len(skipped_required)} required check(s) unexpectedly SKIPPED:\n")
-    for req, conc in skipped_required:
-        sys.stderr.write(f"  - SKIPPED: '{req}'\n")
-    sys.stderr.write("[CI-GATE-FAIL] Essential verification jobs must execute and pass without being skipped.\n")
-    sys.exit(1)
+print(
+    f"[CI-PASS] Retrieved and verified {retrieved_total} check runs."
+)
+print(
+    f"[CI-PASS] All {len(required_checks)} required checks succeeded:"
+)
 
-if failed_required:
-    sys.stderr.write(f"[CI-GATE-FAIL] {len(failed_required)} required check(s) did NOT succeed:\n")
-    for req, conc in failed_required:
-        sys.stderr.write(f"  - FAILED/UNSUCCESSFUL: '{req}' (conclusion={conc})\n")
-    sys.exit(1)
-
-# 3. Inspect all check runs across the commit for failures or pending checks
-overall_failed = []
-overall_pending = []
-for name, run in latest_runs_by_name.items():
-    st = run.get("status")
-    conc = run.get("conclusion")
-    if st != "completed":
-        overall_pending.append((name, st))
-    elif conc in ("failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale"):
-        overall_failed.append((name, conc))
-
-if overall_pending:
-    sys.stderr.write(f"[CI-GATE-WAIT] Non-required check(s) still in progress:\n")
-    for name, st in overall_pending:
-        sys.stderr.write(f"  - IN PROGRESS: '{name}' (status={st})\n")
-    sys.exit(1)
-
-if overall_failed:
-    sys.stderr.write(f"[CI-GATE-FAIL] Commit contains {len(overall_failed)} failed check run(s):\n")
-    for name, conc in overall_failed:
-        sys.stderr.write(f"  - FAILED: '{name}' (conclusion={conc})\n")
-    sys.exit(1)
-
-print(f"[CI-GATE-PASS] Verified {total_count} check-runs across {len(page_files)} page(s). All {len(required_checks)} required checks passed with SUCCESS:")
-for p in passed_required:
-    print(f"  ✓ {p}")
-sys.exit(0)
+for name in required_checks:
+    print(f"  - {name}")
 PYEOF
 
-    # Python returns 0 on success; set -e will fail closed if Python exited with non-zero
-fi
+    echo "[CI] GitHub Actions verification passed."
 
-# 7. Execute Atomic Release Deployment
-if [[ -f "${DEPLOY_SCRIPT}" ]]; then
-    echo "[PULL-DEPLOY] Invoking atomic deployment script: ${DEPLOY_SCRIPT}..."
-    bash "${DEPLOY_SCRIPT}" "${CLONE_STAGE_DIR}"
 else
-    echo "[PULL-DEPLOY] Invoking staged deployment script..."
-    bash "${CLONE_STAGE_DIR}/deployment/raspberry-pi/scripts/deploy.sh" "${CLONE_STAGE_DIR}"
+
+    echo "[CI-WARN] CI gate is disabled in the environment configuration."
+
 fi
 
+# ------------------------------------------------------------------------------
+# 7. Validate staged deployment script
+# ------------------------------------------------------------------------------
+
+STAGED_DEPLOY_SCRIPT="${CLONE_STAGE_DIR}/deployment/raspberry-pi/scripts/deploy.sh"
+
+if [[ ! -f "${STAGED_DEPLOY_SCRIPT}" ]]; then
+    echo "[ERROR] Deployment script is missing from the staged commit." >&2
+    exit 1
+fi
+
+if ! bash -n "${STAGED_DEPLOY_SCRIPT}"; then
+    echo "[ERROR] Staged deployment script failed shell syntax validation." >&2
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
+# 8. Execute deployment
+#
+# This script already owns the lock. Pass the ownership flag so deploy.sh
+# does not attempt to acquire the same lock again.
+#
+# Use deploy.sh from the staged commit, not an older installed copy.
+# ------------------------------------------------------------------------------
+
+echo "[DEPLOY] Starting deployment for commit ${TARGET_COMMIT}."
+
+DEPLOY_LOCK_HELD=1 \
+    bash "${STAGED_DEPLOY_SCRIPT}" "${CLONE_STAGE_DIR}"
+
+# ------------------------------------------------------------------------------
+# 9. Confirm active release commit
+# ------------------------------------------------------------------------------
+
+if [[ ! -f "${CURRENT_RELEASE_LINK}/backend/.git_commit" ]]; then
+    echo "[ERROR] Active release commit marker is missing." >&2
+    exit 1
+fi
+
+ACTIVE_COMMIT="$(
+    cat "${CURRENT_RELEASE_LINK}/backend/.git_commit"
+)"
+
+if [[ "${ACTIVE_COMMIT}" != "${TARGET_COMMIT}" ]]; then
+    echo "[ERROR] Active release commit does not match target commit." >&2
+    echo "[ERROR] Target: ${TARGET_COMMIT}" >&2
+    echo "[ERROR] Active: ${ACTIVE_COMMIT}" >&2
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
+# Success
+# ------------------------------------------------------------------------------
+
 echo "======================================================================"
-echo " VeyraSense update completed successfully for commit ${TARGET_COMMIT:0:10}."
+echo "[PULL-DEPLOY-SUCCESS] VeyraSense update completed."
+echo "Repository: ${REPO_SLUG}"
+echo "Branch: ${BRANCH}"
+echo "Commit: ${TARGET_COMMIT}"
 echo "======================================================================"
+
 exit 0

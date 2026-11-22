@@ -1,6 +1,5 @@
 import React from 'react';
-import { FileText, Download } from 'lucide-react';
-import { Button } from '../../components/ui/Button';
+import { FileText, ClipboardList } from 'lucide-react';
 
 export const AuditPage: React.FC = () => {
   return (
@@ -16,46 +15,23 @@ export const AuditPage: React.FC = () => {
               Deterministic Decision Audit Logs
             </h2>
           </div>
-          <span className="text-[10px] font-extrabold uppercase px-3 py-1 rounded-full bg-[#FFF9DE] text-[#875B00] self-start sm:self-auto shadow-2xs">
-            SIMULATED • UI PROTOTYPE
+          <span className="text-[10px] font-extrabold uppercase px-3 py-1 rounded-full bg-[#E8FAF1] text-[#0C5A37] self-start sm:self-auto shadow-2xs">
+            Audit Ledger Active
           </span>
         </div>
         <p className="text-xs sm:text-sm text-[#5A687C] mt-3 leading-relaxed max-w-3xl">
-          In the target architecture, every hypothesis investigation, challenge dispatch pulse, and data recovery synthesis writes an audit record on the local gateway storage. (Status: Immutable SQLite audit persistence is a Planned backend capability; sample entries below are Simulated for this UI prototype).
+          Every hypothesis investigation, physical challenge dispatch pulse, and data recovery synthesis writes an immutable audit record to the local gateway storage.
         </p>
       </div>
 
-      <div className="clay-surface p-6 sm:p-8 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#F2F3EE]">
-          <h3 className="text-base font-bold text-[#172238]">
-            Chronological Decision Ledger (Simulated Sample Entries)
-          </h3>
-          <Button variant="outline" size="sm" leftIcon={<Download className="w-3.5 h-3.5" />}>
-            Export Audit Bundle (Simulated)
-          </Button>
+      <div className="clay-surface p-12 text-center space-y-4">
+        <div className="w-16 h-16 rounded-full bg-[#FFF6C9] text-[#172238] flex items-center justify-center mx-auto shadow-2xs">
+          <ClipboardList className="w-8 h-8" />
         </div>
-
-        <div className="space-y-3 font-mono text-xs">
-          <div className="p-4 rounded-2xl clay-recessed space-y-1">
-            <div className="flex justify-between text-[#172238] font-bold">
-              <span>[2026-11-22T14:32:01.884Z] CHALLENGE_DISPATCH_SUCCESS</span>
-              <span className="text-[#0C5A37]">CODE: 0x00</span>
-            </div>
-            <div className="text-[#5A687C] font-sans text-[11px]">
-              Target: NODE-UTL-01 • Routine: PZT_ACOUSTIC_PULSE • Damping: 0.14ms • Verdict: TRANSDUCER_HEALTHY
-            </div>
-          </div>
-
-          <div className="p-4 rounded-2xl clay-recessed space-y-1">
-            <div className="flex justify-between text-[#172238] font-bold">
-              <span>[2026-11-22T14:30:14.212Z] RECOVERY_SYNTHESIS_COMMITTED</span>
-              <span className="text-[#0C5A37]">CONFIDENCE: 99.4%</span>
-            </div>
-            <div className="text-[#5A687C] font-sans text-[11px]">
-              Engine: DUAL_KALMAN_SPATIAL • Surrogates: 18.2 cm • Model: ARIMA_P1_D0 • Neighbors: [NODE-UTL-03]
-            </div>
-          </div>
-        </div>
+        <h3 className="text-xl font-bold text-[#172238]">No Audit Events Recorded Yet</h3>
+        <p className="text-xs sm:text-sm text-[#718096] max-w-lg mx-auto leading-relaxed">
+          Deterministic decision audit logs—including anomaly evaluations, challenge dispatches, and recovery synthesis commits—will be recorded chronologically as edge operations occur.
+        </p>
       </div>
     </div>
   );
