@@ -1,0 +1,11 @@
+[Unit]
+Description=VeyraSense Automated Secure Update Service (Pi-Initiated Pull)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/veyrasense/scripts/pull-deploy.sh
+StandardOutput=append:/var/log/veyrasense/deployment.log
+StandardError=append:/var/log/veyrasense/deployment.log

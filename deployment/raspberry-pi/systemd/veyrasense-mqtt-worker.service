@@ -1,0 +1,34 @@
+[Unit]
+Description=VeyraSense MQTT Telemetry Ingestion Worker Daemon
+After=network.target mosquitto.service veyrasense-backend.service
+Requires=mosquitto.service
+
+[Service]
+Type=simple
+User=veyrasense
+Group=veyrasense
+WorkingDirectory=/opt/veyrasense/current/backend
+EnvironmentFile=/etc/veyrasense/veyrasense.env
+
+# Run dedicated MQTT worker daemon
+ExecStart=/opt/veyrasense/current/backend/.venv/bin/python -m app.mqtt_worker
+
+# Process Reliability
+Restart=always
+RestartSec=5s
+KillMode=mixed
+TimeoutStopSec=10s
+
+# Security Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/veyrasense /var/log/veyrasense /run
+PrivateTmp=true
+
+# Standard Output & Logging
+StandardOutput=append:/var/log/veyrasense/mqtt-worker.log
+StandardError=append:/var/log/veyrasense/mqtt-worker.error.log
+
+[Install]
+WantedBy=multi-user.target

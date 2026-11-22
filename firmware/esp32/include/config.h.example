@@ -1,0 +1,41 @@
+// ==============================================================================
+// VeyraSense ESP32 Node Configuration Template (config.h.example)
+// Copy this file to "config.h" and populate credentials provisioned via Dashboard.
+// NEVER COMMIT "config.h" WITH LIVE PASSWORDS OR API KEYS TO VERSION CONTROL.
+// ==============================================================================
+#ifndef VEYRASENSE_CONFIG_H
+#define VEYRASENSE_CONFIG_H
+
+// --- Wi-Fi Network Credentials ---
+#define WIFI_SSID           "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD       "YOUR_WIFI_PASSWORD"
+
+// --- VeyraSense Edge Gateway (Raspberry Pi 5) ---
+#define MQTT_BROKER_HOST    "192.168.1.100"  // Static IP or hostname of Raspberry Pi 5
+#define MQTT_BROKER_PORT    1883             // Mosquitto standard unencrypted port
+
+// --- Unique Node Identity & Dynamic Credentials ---
+// Copy verbatim from VeyraSense Dashboard > Devices > Provision Node Dialog
+#define VEYRASENSE_NODE_ID  "NODE-ESP32-XXXX"
+#define MQTT_USERNAME       "NODE-ESP32-XXXX"
+#define MQTT_PASSWORD       "GENERATED_MQTT_PASSWORD_FROM_DASHBOARD"
+#define VEYRASENSE_KEY      "GENERATED_DEVICE_API_KEY_FROM_DASHBOARD"
+
+// --- Per-Node MQTT Topics (Restricted strictly by Mosquitto ACL) ---
+#define MQTT_TOPIC_TELEMETRY "veyrasense/nodes/" VEYRASENSE_NODE_ID "/telemetry"
+#define MQTT_TOPIC_STATUS    "veyrasense/nodes/" VEYRASENSE_NODE_ID "/status"
+#define MQTT_TOPIC_COMMANDS  "veyrasense/nodes/" VEYRASENSE_NODE_ID "/commands"
+
+// --- Hardware Transducer Pinouts ---
+#define DHT_PIN             4    // GPIO 4 connected to DHT11 Signal pin
+#define DHT_TYPE            DHT11
+#define MQ135_PIN           34   // GPIO 34 (ADC1_CH6 - Input only) for MQ-135 Analog A0
+#define STATUS_LED_PIN      2    // Built-in blue LED for connection status
+
+// --- Timing Parameters ---
+#define TELEMETRY_INTERVAL_MS 5000  // Ingestion sample period in milliseconds
+#define NTP_SERVER            "pool.ntp.org"
+#define GMT_OFFSET_SEC        0     // UTC offset in seconds
+#define DAYLIGHT_OFFSET_SEC   0
+
+#endif // VEYRASENSE_CONFIG_H

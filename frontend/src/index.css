@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-sidebar: #172238;
+  --color-brand-bg: #F7F7F0;
+  --color-brand-yellow: #FFD21C;
+  --color-brand-yellow-hover: #EFC000;
+  --color-brand-yellow-pale: #FFF6C9;
+  --color-brand-card: #FFFFFF;
+  --color-brand-mint: #78E9AD;
+  --color-brand-mint-dark: #0C5A37;
+  --color-brand-blue: #5BA4F5;
+  --color-brand-blue-dark: #1D63B8;
+  --color-brand-text: #172238;
+  --color-brand-text-secondary: #718096;
+  --color-brand-border: #ECEDE8;
+  --color-brand-error: #EF6461;
+}
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  color: #172238;
+  background-color: #F7F7F0;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #F7F7F0;
+  color: #172238;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ==============================================================================
+ * CLAYMORPHISM & TACTILE 3D SURFACE TOKENS
+ * Soft, borderless depth with dual ambient shadows and specular inset highlights
+ * ============================================================================== */
+
+/* 1. Primary White Clay Surface (replaces harsh bordered cards) */
+.clay-surface {
+  background: #FFFFFF;
+  border-radius: 24px;
+  box-shadow:
+    0 12px 28px -6px rgba(23, 34, 56, 0.05),
+    0 4px 12px -2px rgba(23, 34, 56, 0.02),
+    inset 0 1px 2px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -2px 3px 0 rgba(23, 34, 56, 0.02);
+  border: none;
+}
+
+/* 2. Interactive Tactile Clay Surface */
+.clay-surface-interactive {
+  background: #FFFFFF;
+  border-radius: 24px;
+  box-shadow:
+    0 10px 24px -5px rgba(23, 34, 56, 0.04),
+    0 4px 8px -2px rgba(23, 34, 56, 0.02),
+    inset 0 1px 2px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -2px 3px 0 rgba(23, 34, 56, 0.02);
+  border: none;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.clay-surface-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 18px 36px -8px rgba(23, 34, 56, 0.08),
+    0 6px 16px -3px rgba(23, 34, 56, 0.03),
+    inset 0 1px 2px 0 rgba(255, 255, 255, 1),
+    inset 0 -2px 4px 0 rgba(23, 34, 56, 0.02);
+}
+
+/* 3. Pale Yellow Hero & Banner Clay Surface */
+.clay-yellow-banner {
+  background: #FFF6C9;
+  border-radius: 26px;
+  box-shadow:
+    0 14px 30px -8px rgba(255, 210, 28, 0.22),
+    0 4px 10px -2px rgba(255, 210, 28, 0.12),
+    inset 0 2px 3px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -3px 5px 0 rgba(220, 160, 0, 0.15);
+  border: none;
+}
+
+/* 4. Dark Slate Tactile Surface */
+.clay-dark {
+  background: #172238;
+  border-radius: 26px;
+  box-shadow:
+    0 18px 40px -10px rgba(10, 18, 32, 0.45),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -3px 6px 0 rgba(0, 0, 0, 0.35);
+  border: none;
+}
+
+/* 5. Recessed Well (for inputs, filter trays, search wells, and toggle tracks) */
+.clay-recessed {
+  background: #EEEFEA;
+  border-radius: 18px;
+  box-shadow:
+    inset 0 2px 4px 0 rgba(23, 34, 56, 0.06),
+    inset 0 1px 2px 0 rgba(23, 34, 56, 0.04),
+    0 1px 0 0 rgba(255, 255, 255, 0.85);
+  border: none;
+}
+
+/* 6. Tactile Golden-Yellow Primary Button */
+.clay-btn-primary {
+  background: #FFD21C;
+  color: #172238;
+  border-radius: 16px;
+  font-weight: 700;
+  box-shadow:
+    0 6px 18px -3px rgba(255, 210, 28, 0.45),
+    0 2px 6px -1px rgba(255, 210, 28, 0.25),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -2px 3px 0 rgba(186, 137, 0, 0.3);
+  border: none;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.clay-btn-primary:hover {
+  background: #FFD834;
+  transform: translateY(-1px);
+  box-shadow:
+    0 10px 22px -4px rgba(255, 210, 28, 0.55),
+    inset 0 1px 2px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -2px 4px 0 rgba(186, 137, 0, 0.35);
+}
+
+.clay-btn-primary:active {
+  transform: translateY(1px);
+  box-shadow:
+    0 2px 6px -1px rgba(255, 210, 28, 0.35),
+    inset 0 2px 3px 0 rgba(150, 105, 0, 0.35);
+}
+
+/* 7. Soft Tactile Pills */
+.clay-pill-mint {
+  background: #E8FAF1;
+  color: #0C5A37;
+  border-radius: 9999px;
+  box-shadow:
+    0 4px 10px -2px rgba(120, 233, 173, 0.3),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 2px 0 rgba(12, 90, 55, 0.1);
+  border: none;
+}
+
+.clay-pill-blue {
+  background: #EBF4FE;
+  color: #134685;
+  border-radius: 9999px;
+  box-shadow:
+    0 4px 10px -2px rgba(91, 164, 245, 0.3),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 2px 0 rgba(19, 70, 133, 0.1);
+  border: none;
+}
+
+.clay-pill-yellow {
+  background: #FFF9DE;
+  color: #875B00;
+  border-radius: 9999px;
+  box-shadow:
+    0 4px 10px -2px rgba(255, 210, 28, 0.35),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 2px 0 rgba(135, 91, 0, 0.12);
+  border: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
