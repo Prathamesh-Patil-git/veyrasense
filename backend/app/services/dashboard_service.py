@@ -150,7 +150,7 @@ class DashboardService:
             event_ts = (
                 n.last_seen_at.strftime("%H:%M:%S")
                 if n.last_seen_at
-                else (n.created_at.strftime("%H:%M:%S") if n.created_at else "—")
+                else (n.registered_at.strftime("%H:%M:%S") if n.registered_at else "—")
             )
             recent_activity.append(
                 ActivityEventItem(
