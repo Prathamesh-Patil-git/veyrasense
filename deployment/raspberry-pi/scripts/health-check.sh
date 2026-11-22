@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # ==============================================================================
 # VeyraSense — Edge Gateway Health Check

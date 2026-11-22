@@ -36,12 +36,10 @@ die() {
     exit 1
 }
 
-cleanup() {
-    if [[ -f "${TEMP_FILE}" ]]; then
-        rm -f "${TEMP_FILE}"
-    fi
-}
-trap cleanup EXIT INT TERM
+# Remove incomplete temporary backup on exit.
+trap 'rm -f -- "${TEMP_FILE}"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ------------------------------------------------------------------------------
 # 1. Validate prerequisites
@@ -74,7 +72,7 @@ mkdir -p "${BACKUP_DIR}"
     die "Backup directory is not writable: ${BACKUP_DIR}"
 
 if [[ -e "${BACKUP_FILE}" || -e "${TEMP_FILE}" ]]; then
-    die "Backup filename collision. Retry after checking the backup directory."
+    die "Backup filename collision. Check the backup directory."
 fi
 
 log "Starting SQLite online backup."
@@ -83,9 +81,6 @@ log "Temporary destination: ${TEMP_FILE}"
 
 # ------------------------------------------------------------------------------
 # 3. Create consistent SQLite backup
-#
-# SQLite .backup uses the online backup API. It includes committed data
-# consistently even when the source database uses WAL mode.
 # ------------------------------------------------------------------------------
 
 if ! sqlite3 "${DB_PATH}" ".backup '${TEMP_FILE}'"; then
@@ -96,7 +91,7 @@ fi
     die "Backup file is empty or was not created."
 
 # ------------------------------------------------------------------------------
-# 4. Verify the completed backup
+# 4. Verify completed backup
 # ------------------------------------------------------------------------------
 
 log "Checking backup database integrity."
@@ -123,7 +118,7 @@ mv "${TEMP_FILE}" "${BACKUP_FILE}"
 log "Backup created successfully: ${BACKUP_FILE}"
 
 # ------------------------------------------------------------------------------
-# 6. Retain the latest 10 successful backups
+# 6. Retain latest 10 successful backups
 # ------------------------------------------------------------------------------
 
 log "Pruning old backups; retaining 10 most recent."

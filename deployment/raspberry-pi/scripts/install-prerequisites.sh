@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # ==============================================================================
 # VeyraSense — Debian 13 / Raspberry Pi 5 Prerequisite Installer

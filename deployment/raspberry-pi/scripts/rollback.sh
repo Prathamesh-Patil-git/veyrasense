@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # ==============================================================================
 # VeyraSense — Production Release Rollback

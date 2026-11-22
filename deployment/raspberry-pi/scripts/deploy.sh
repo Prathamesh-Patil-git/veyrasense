@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # ==============================================================================
 # VeyraSense — Atomic Production Release Deployment

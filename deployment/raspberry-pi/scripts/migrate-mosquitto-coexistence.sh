@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # ==============================================================================
 # VeyraSense - Mosquitto Coexistence Migration
