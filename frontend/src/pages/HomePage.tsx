@@ -576,7 +576,7 @@ export const HomePage: React.FC = () => {
               <div className="space-y-2 pt-2 text-xs">
                 <div className="flex items-center justify-between p-3 rounded-xl clay-recessed">
                   <span className="font-semibold text-[#172238]">MQTT Broker</span>
-                  <span className="text-[#0C5A37] font-bold">Mosquitto (Local Port 1884)</span>
+                  <span className="text-[#0C5A37] font-bold">Mosquitto (Local Port 1883)</span>
                 </div>
                 <div className="flex items-center justify-between p-3 rounded-xl clay-recessed">
                   <span className="font-semibold text-[#172238]">Telemetry Ingestion</span>

@@ -310,7 +310,7 @@ export const DevicesPage: React.FC = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#718096]">Protocol:</span>
-                    <span className="font-semibold text-[#172238]">MQTT (Port 1884)</span>
+                    <span className="font-semibold text-[#172238]">MQTT (Port 1883)</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#718096]">MQTT Topic:</span>
@@ -522,7 +522,7 @@ export const DevicesPage: React.FC = () => {
                       checked={formProtocol === 'mqtt'}
                       onChange={() => setFormProtocol('mqtt')}
                     />
-                    <span className="font-semibold text-[#172238]">MQTT (Mosquitto Port 1884)</span>
+                    <span className="font-semibold text-[#172238]">MQTT (Mosquitto Port 1883)</span>
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input

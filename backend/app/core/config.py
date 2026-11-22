@@ -41,7 +41,7 @@ class Settings(BaseSettings):
 
     # MQTT & Mosquitto Provisioning
     MQTT_BROKER_HOST: str = "localhost"
-    MQTT_BROKER_PORT: int = 1884
+    MQTT_BROKER_PORT: int = 1883
     MQTT_BACKEND_USERNAME: str = "veyrasense_backend"
     MQTT_BACKEND_PASSWORD: str = "veyrasense_internal_backend_key_secure"
     MOSQUITTO_CONFIG_DIR: Path = Field(default=Path("data/mosquitto"))

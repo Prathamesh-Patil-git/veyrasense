@@ -134,7 +134,7 @@ export const ContactPage: React.FC = () => {
                 </div>
                 <div>
                   <div className="font-bold text-[#172238]">Course Project Repository</div>
-                  <div className="text-[#718096] mt-0.5 font-mono">cares-iot/frontend & backend</div>
+                  <div className="text-[#718096] mt-0.5 font-mono">veyrasense/frontend & backend</div>
                   <div className="text-[#0C5A37] font-semibold mt-1">Autonomous edge research</div>
                 </div>
               </div>

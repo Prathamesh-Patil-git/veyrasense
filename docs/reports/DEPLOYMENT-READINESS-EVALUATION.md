@@ -22,7 +22,7 @@ The audit verified and hardened seven critical operational requirements:
    - `Deployment Scripts Syntax & ShellCheck`
 3. **Strict Check Conclusion & Skip Rejection:** Explicitly rejects missing, failed, cancelled, timed-out, or unexpectedly skipped required checks. Any skipped required check triggers a fail-closed abort.
 4. **Public & Private Repository Authentication:** Handled GitHub API authentication cleanly via bearer token if `GITHUB_TOKEN` is present, while safely falling back to unauthenticated public repository mode, logging informative diagnostic errors without disclosing token values.
-5. **Origin & Main Branch Pinning:** Enforced strict synchronization from `https://github.com/cares-iot/veyrasense.git` and `main` branch only, rejecting origin tampering or arbitrary commit overrides.
+5. **Origin & Main Branch Pinning:** Enforced strict synchronization from `https://github.com/Prathamesh-Patil-git/veyrasense.git` and `main` branch only, rejecting origin tampering or arbitrary commit overrides.
 6. **Strict Fail-Closed Architecture:** If network connectivity fails, API rate limits are hit, responses are non-200 or malformed, or zero check runs exist, the runner immediately halts with an exit code of 1.
 7. **Zero-Secret Log Sanitization:** Ensured no GitHub tokens, private SSH keys, or application secrets appear in standard output, error streams, or logging facilities.
 
@@ -36,7 +36,7 @@ The audit verified and hardened seven critical operational requirements:
 | **2. Required CI Jobs** | Generic check counted total checks without ensuring essential build/test jobs executed. | Pinned the 4 essential CI jobs from `ci.yml`. Enforces that every required job exists in the commit's check runs and completed with `conclusion=success`. | **VERIFIED & ENFORCED** |
 | **3. Skip & Failure Rejection** | Skipped required checks could theoretically pass if only failed checks were counted. | Implemented explicit check: any required check with `conclusion="skipped"` or not `"success"` is strictly rejected with exit code 1. | **VERIFIED & ENFORCED** |
 | **4. API Auth (Public & Private)** | Unauthenticated requests failed abruptly on private repositories or rate-limited public repos. | Implemented dual-mode authentication: uses `Authorization: Bearer ${GITHUB_TOKEN}` if configured; provides clear diagnostic failure messages on HTTP 401, 403, and 404 without leaking secrets. | **VERIFIED & ENFORCED** |
-| **5. Repository & Branch Pinning** | Deploying arbitrary branches or untrusted remotes could introduce unvetted code. | Hardcoded `EXPECTED_REPO_URL="https://github.com/cares-iot/veyrasense.git"` and `BRANCH="main"`. Validates remote origin URL in git cache. | **VERIFIED & ENFORCED** |
+| **5. Repository & Branch Pinning** | Deploying arbitrary branches or untrusted remotes could introduce unvetted code. | Hardcoded `EXPECTED_REPO_URL="https://github.com/Prathamesh-Patil-git/veyrasense.git"` and `BRANCH="main"`. Validates remote origin URL in git cache. | **VERIFIED & ENFORCED** |
 | **6. Fail-Closed Operation** | Connectivity failures could leave ambiguity in execution flow. | All network timeouts, HTTP errors, parser errors, missing jobs, and pending states fail closed immediately (`exit 1`). | **VERIFIED & ENFORCED** |
 | **7. Secret Masking in Logs** | Headers or tokens could be logged during execution or shell error traps. | Passed auth headers via bash arrays; suppressed curl progress; masked auth status in logs (`configured (Bearer token present)` vs `unauthenticated`); secured and trapped temp files. | **VERIFIED & ENFORCED** |
 
@@ -57,7 +57,7 @@ TOTAL_COUNT=-1
 
 while [[ ${PAGE} -le ${MAX_PAGES} ]]; do
     PAGE_FILE="${CI_TEMP_DIR}/page_${PAGE}.json"
-    CHECK_RUNS_URL="https://api.github.com/repos/cares-iot/veyrasense/commits/${TARGET_COMMIT}/check-runs?per_page=${PER_PAGE}&page=${PAGE}"
+    CHECK_RUNS_URL="https://api.github.com/repos/Prathamesh-Patil-git/veyrasense/commits/${TARGET_COMMIT}/check-runs?per_page=${PER_PAGE}&page=${PAGE}"
 
     HTTP_STATUS=$(curl -s -S -w "%{http_code}" -o "${PAGE_FILE}" \
         --connect-timeout 10 \
@@ -114,10 +114,10 @@ When Alembic migrations execute, SQLite operates in Write-Ahead Logging (`WAL`) 
    - The `/opt/veyrasense/current` symlink is atomically repointed to the prior release.
    - Services are restarted and health-probed.
 
-### 3.5 Mosquitto & CARES-RX Coexistence Architecture
-- Drop-in Mosquitto configuration: `/etc/mosquitto/conf.d/00-coexistence.conf` (`per_listener_settings true`) and `/etc/mosquitto/conf.d/veyrasense.conf` (dedicated listener on port 1884).
-- Dual-Listener Isolation: CARES-RX retains listener port 1883 with `/etc/mosquitto/passwd` and `conf.d/caresrx.conf` completely untouched.
-- Topic Isolation & Least Privilege: VeyraSense operates strictly on port 1884 with `/var/lib/veyrasense/mosquitto/mosquitto.acl`. CARES-RX topics (`cares/#`, `caresrx/#`) are strictly forbidden on the VeyraSense listener, and VeyraSense sensor nodes cannot access CARES-RX namespaces or peer device topics.
+### 3.5 Mosquitto Broker Architecture
+- Dedicated Mosquitto configuration: `/etc/mosquitto/conf.d/veyrasense.conf` (dedicated listener on port 1883).
+- Broker Isolation: VeyraSense operates strictly on port 1883 with `/var/lib/veyrasense/mosquitto/mosquitto.acl` and `/var/lib/veyrasense/mosquitto/mosquitto_passwd`.
+- Topic Isolation & Least Privilege: VeyraSense sensor nodes have access only to their own device namespaces (`veyrasense/nodes/{node_id}/...`) and cannot access peer device topics.
 
 ---
 
@@ -152,7 +152,7 @@ When Alembic migrations execute, SQLite operates in Write-Ahead Logging (`WAL`) 
 ├── deploy_cache/                                               <-- ISOLATED GIT STAGING CACHE
 ├── mosquitto/                                                  <-- DYNAMIC BROKER CREDENTIALS
 │   ├── mosquitto_passwd
-│   └── mosquitto.acl (Includes CARES-RX preservation patterns)
+│   └── mosquitto.acl (Per-node ACL enforcement patterns)
 └── models/                                                     <-- ML MODEL ARTIFACTS
     └── (calibration & drift weights)
 
@@ -183,7 +183,7 @@ When Alembic migrations execute, SQLite operates in Write-Ahead Logging (`WAL`) 
   5. `test_ci_gate_pending_required_check`: Check in progress -> exits 1 with `[CI-GATE-WAIT]`.
   6. `test_ci_gate_pagination_accumulation`: Multi-page check-runs aggregated across 2 pages -> exits 0.
   7. `test_ci_gate_non_required_check_failure`: Non-required check failed on commit -> exits 1.
-- **Application & Security Tests:** Authentication, JWT invalidation, device authorization, measurement bounds, node provisioning, MQTT deduplication, cross-node identity isolation, and CARES-RX ACL patterns.
+- **Application & Security Tests:** Authentication, JWT invalidation, device authorization, measurement bounds, node provisioning, MQTT deduplication, and cross-node identity isolation.
 
 ### 5.2 Frontend Compilation & Build
 ```text
@@ -217,7 +217,7 @@ All dependencies in `backend/requirements.txt` provide pre-built `manylinux_aarc
 | **SQLite WAL Persistence** | **Backend Implemented & Tested** | Tested under concurrent multi-node ingestion. |
 | **Dynamic Node Provisioning** | **Backend Implemented & Tested** | Tested via API and test suite. |
 | **Mosquitto MQTT Integration** | **Backend Implemented & Tested** | Verified topic ACL generator & ingestion worker. |
-| **CARES-RX Data Protection** | **Backend Implemented & Tested** | Pattern preservation verified in `mosquitto.acl`. |
+| **Per-Node Topic Isolation** | **Backend Implemented & Tested** | Per-node least-privilege ACL rules verified in `mosquitto.acl`. |
 | **ESP32 Transducer Firmware** | **Firmware Ready (Planned Hardware)** | Modular C++ firmware written; hardware testing planned. |
 | **Atomic Release Management** | **Deployment Implemented & Locally Tested** | Shell scripts verified via `bash -n` and logic flow. |
 | **Pre-Migration DB Backup** | **Deployment Implemented & Locally Tested** | Online SQLite `.backup` mechanism verified. |
@@ -282,36 +282,30 @@ The Settings page was completely redesigned around the authenticated administrat
 
 ---
 
-## 9. Raspberry Pi Mosquitto Coexistence Architecture (Mosquitto 2.0.21)
+## 9. Raspberry Pi Mosquitto Architecture (Mosquitto 2.0.21)
 
-To ensure seamless coexistence with the existing **CARES-RX** prototype already operational on the target Raspberry Pi 5, VeyraSense's broker integration was re-architected to use a single Mosquitto broker daemon hosting two isolated, non-interfering listeners.
+The Raspberry Pi 5 gateway operates a dedicated Eclipse Mosquitto broker daemon for VeyraSense with authenticated access and per-node topic isolation.
 
-### 9.1 Dual-Listener Configuration
-| Parameter | Listener 1: CARES-RX (Preserved) | Listener 2: VeyraSense (Isolated) |
-|---|---|---|
-| **Port & Interface** | `1883 0.0.0.0` | `1884 0.0.0.0` |
-| **Configuration File** | `/etc/mosquitto/conf.d/caresrx.conf` | `/etc/mosquitto/conf.d/veyrasense.conf` |
-| **Authentication File** | `/etc/mosquitto/passwd` | `/var/lib/veyrasense/mosquitto/mosquitto_passwd` |
-| **ACL File** | Managed by CARES-RX | `/var/lib/veyrasense/mosquitto/mosquitto.acl` |
-| **Anonymous Access** | Governed by CARES-RX policy | Strictly forbidden (`allow_anonymous false`) |
-| **Scoping Directive** | `per_listener_settings true` in `/etc/mosquitto/conf.d/00-coexistence.conf` |
+### 9.1 Broker Configuration
+| Parameter | VeyraSense Dedicated Broker |
+|---|---|
+| **Port & Interface** | `1883 0.0.0.0` |
+| **Configuration File** | `/etc/mosquitto/conf.d/veyrasense.conf` |
+| **Authentication File** | `/var/lib/veyrasense/mosquitto/mosquitto_passwd` |
+| **ACL File** | `/var/lib/veyrasense/mosquitto/mosquitto.acl` |
+| **Anonymous Access** | Strictly forbidden (`allow_anonymous false`) |
 
 ### 9.2 Key Safety & Isolation Principles
-1. **Zero CARES-RX File Mutation:** VeyraSense services and deployment scripts NEVER read, write, merge into, or regenerate `/etc/mosquitto/passwd` or `/etc/mosquitto/conf.d/caresrx.conf`.
-2. **PBKDF2-HMAC-SHA512 Password Hashing ($7$):** Generated credentials for both the internal backend user (`veyrasense_backend`) and provisioned ESP32 sensor nodes use standard Mosquitto 2.0 `$7$` PBKDF2 hashes with 12 random salt bytes and 20,000 rounds. Plaintext passwords in Mosquitto files are strictly prohibited. The password file `/var/lib/veyrasense/mosquitto/mosquitto_passwd` is pre-populated with valid `$7$` hashes before the listener is enabled.
-3. **Safe Staging Validation (No Unsupported `-t` Flag):** Mosquitto 2.0.21 on Debian 13 does not support the `-t` test flag. The migration script [migrate-mosquitto-coexistence.sh](file:///d:/TY%20IOT%20SEM%205/AIOT/Course-Project/cares-iot/deployment/raspberry-pi/scripts/migrate-mosquitto-coexistence.sh) performs safe validation by spinning up a temporary staging Mosquitto instance on ephemeral high ports (`21883`, `21884`) with isolated pid and log paths. The running broker on port 1883 is never interrupted during validation.
-4. **Strict Topic Isolation:** CARES-RX topics (`cares/#`, `caresrx/#`) are strictly excluded from VeyraSense ACLs. VeyraSense users and sensor nodes have zero permissions on CARES-RX topics, and sensor nodes can only publish to their own `veyrasense/nodes/{node_id}/...` endpoints.
-5. **Secure Permission Model:** Persistent Mosquitto files are owned by `veyrasense:mosquitto` with directory SGID permission `2750` and file permissions `0640`, ensuring the unprivileged backend has write access while the Mosquitto service daemon has read-only access.
-6. **Robust Rollback:** On any staging validation failure, service restart failure, or post-restart socket probe failure, the script automatically restores the full timestamped backup of `/etc/mosquitto`, restarts the original broker, verifies port 1883 is active, and preserves the backup directory for manual audit.
-7. **Preservation of Pre-existing Backups:** The migration script never deletes `99-veyrasense.conf.disabled` or other pre-existing backup files, only removing the active conflicting `/etc/mosquitto/conf.d/99-veyrasense.conf`.
-8. **Zero Hardcoded Secrets & Placeholder Rejection:** The migration script requires genuine production credentials from `/etc/veyrasense/veyrasense.env`. If credentials are missing, empty, or contain template placeholders (`REPLACE_`, `CHANGE`, `PLACEHOLDER`, length < 12), the script aborts immediately before modifying Mosquitto.
-9. **Zero Plaintext Command-Line Exposure:** Passwords are never passed via command-line arguments (argv). Hashes are generated via `mosquitto_passwd -U` on temporary `0600` files or standard Python `hashlib.pbkdf2_hmac` via stdin piping.
-10. **Preservation of Existing Sensor Nodes:** When updating backend credentials, existing sensor node entries in `mosquitto_passwd` and per-node ACL blocks in `mosquitto.acl` are strictly preserved.
-11. **Live Staging & Cross-Listener Verification:** Live authentication is tested against the staging test broker (port 21884), and post-migration tests verify that Port 1884 accepts genuine credentials, rejects invalid ones, and Port 1883 (CARES-RX) rejects VeyraSense credentials.
-12. **Decoupled Prerequisites & Preserved Nginx Defaults:** `install-prerequisites.sh` strictly preserves `/etc/nginx/sites-enabled/default`, never suppresses Nginx errors (`nginx -t && systemctl reload nginx`), resolves all paths relative to the script, leaves Mosquitto migration as an explicit separate operation, and keeps VeyraSense daemons and update timers disabled until initial deployment.
+1. **Dedicated Port 1883 Broker:** VeyraSense operates as the primary MQTT broker on standard port 1883 with dedicated configuration and authentication files.
+2. **PBKDF2-HMAC-SHA512 Password Hashing ($7$):** Generated credentials for both the internal backend user (`veyrasense_backend`) and provisioned ESP32 sensor nodes use standard Mosquitto 2.0 `$7$` PBKDF2 hashes with 12 random salt bytes and 20,000 rounds. Plaintext passwords in Mosquitto files are strictly prohibited. The password file `/var/lib/veyrasense/mosquitto/mosquitto_passwd` is populated with valid `$7$` hashes before any device connects.
+3. **Strict Topic Isolation:** VeyraSense sensor nodes have zero permissions on peer topics, and sensor nodes can only publish to their own `veyrasense/nodes/{node_id}/...` endpoints.
+4. **Secure Permission Model:** Persistent Mosquitto files are owned by `veyrasense:mosquitto` with directory SGID permission `2750` and file permissions `0640`, ensuring the unprivileged backend has write access while the Mosquitto service daemon has read-only access.
+5. **Zero Hardcoded Secrets & Placeholder Rejection:** Genuine production credentials are required from `/etc/veyrasense/veyrasense.env`. If credentials are missing, empty, or contain template placeholders (`REPLACE_`, `CHANGE`, `PLACEHOLDER`, length < 12), the backend configuration sync rejects them.
+6. **Preservation of Existing Sensor Nodes:** When updating backend credentials, existing sensor node entries in `mosquitto_passwd` and per-node ACL blocks in `mosquitto.acl` are strictly preserved.
+7. **Decoupled Prerequisites & Preserved Nginx Defaults:** `install-prerequisites.sh` strictly preserves `/etc/nginx/sites-enabled/default`, never suppresses Nginx errors (`nginx -t && systemctl reload nginx`), resolves all paths relative to the script, and keeps VeyraSense daemons and update timers disabled until initial deployment.
 
 ---
 
 ## 10. Conclusion
 
-The VeyraSense deployment pipeline fulfills all GitHub CI/CD gate, operational reliability, user interface authenticity, and broker coexistence criteria. The Pi pull-deployment runner will safely and autonomously evaluate incoming code commits against the upstream repository, paginate across all check runs, enforce essential verification jobs with zero tolerance for unexpected skips, protect CARES-RX broker configuration and port 1883, suppress duplicate runs, and roll back cleanly if database migrations or health probes fail. All operational and dashboard views now reflect genuine backend state without simulated fallbacks or demo placeholders.
+The VeyraSense deployment pipeline fulfills all GitHub CI/CD gate, operational reliability, user interface authenticity, and broker isolation criteria. The Pi pull-deployment runner will safely and autonomously evaluate incoming code commits against the upstream repository, paginate across all check runs, enforce essential verification jobs with zero tolerance for unexpected skips, suppress duplicate runs, and roll back cleanly if database migrations or health probes fail. All operational and dashboard views now reflect genuine backend state without simulated fallbacks or demo placeholders.

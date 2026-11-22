@@ -11,7 +11,6 @@ class MetricSummary(BaseModel):
     change_type: str  # positive, neutral, negative
     timeframe: str
     accent: str  # slate, mint, yellow, blue
-    is_demo: bool = False
     sparkline: List[float] = []
 
 

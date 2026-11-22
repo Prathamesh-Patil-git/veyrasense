@@ -54,7 +54,6 @@ MAINTENANCE_SCRIPTS=(
     backup-db.sh
     health-check.sh
     pull-deploy.sh
-    migrate-mosquitto-coexistence.sh
 )
 
 SYSTEMD_UNITS=(
@@ -342,7 +341,7 @@ systemctl daemon-reload
 # ------------------------------------------------------------------------------
 # 12. Keep VeyraSense services stopped and disabled
 #
-# This does not stop or disable CARES-RX or Mosquitto.
+# This ensures fresh deployment begins in a clean stopped state.
 # ------------------------------------------------------------------------------
 
 log "Keeping VeyraSense application services disabled."
@@ -408,8 +407,7 @@ echo "   VeyraSense site installed and validated."
 echo "   Existing default site was not removed."
 echo ""
 echo " Mosquitto:"
-echo "   Configuration migration was NOT executed."
-echo "   Existing CARES-RX configuration was NOT modified."
+echo "   Dedicated VeyraSense broker configuration installed."
 echo ""
 echo " Application services:"
 echo "   Backend:     stopped"
@@ -420,7 +418,6 @@ echo ""
 echo " Next:"
 echo "   Configure production environment values."
 echo "   Verify GitHub deployment key and API token configuration."
-echo "   Review Mosquitto coexistence migration separately."
 echo "   Deploy VeyraSense before enabling its services."
 echo "======================================================================"
 

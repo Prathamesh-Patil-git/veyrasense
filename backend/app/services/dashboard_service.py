@@ -62,7 +62,7 @@ class DashboardService:
             if registered_nodes > 0
             else 100.0
         )
-        quality_score = max(90.0, min(100.0, network_health - (calibrating_nodes * 0.5)))
+        quality_score = network_health if registered_nodes > 0 else 100.0
 
         # Build Primary Metric Cards
         metrics: List[MetricSummary] = [
@@ -74,7 +74,7 @@ class DashboardService:
                 change_type="neutral",
                 timeframe="locally registered",
                 accent="slate",
-                sparkline=[12, 13, 14, 15, 15, registered_nodes],
+                sparkline=[],
             ),
             MetricSummary(
                 label="Online Nodes",
@@ -84,17 +84,17 @@ class DashboardService:
                 change_type="positive" if network_health >= 90 else "neutral",
                 timeframe="real-time ping",
                 accent="mint",
-                sparkline=[11, 12, 13, 14, 14, online_nodes],
+                sparkline=[],
             ),
             MetricSummary(
                 label="Active Investigations",
                 value=investigations,
                 unit="cases",
-                change="Nominal threshold" if investigations == 0 else "Review needed",
+                change="All nodes normal" if investigations == 0 else f"{investigations} require attention",
                 change_type="positive" if investigations == 0 else "negative",
                 timeframe="pending evidence",
                 accent="yellow",
-                sparkline=[2, 1, 3, 2, 1, investigations],
+                sparkline=[],
             ),
             MetricSummary(
                 label="Validated Recoveries",
@@ -104,7 +104,7 @@ class DashboardService:
                 change_type="positive",
                 timeframe="provenance verified",
                 accent="blue",
-                sparkline=[8, 12, 15, 19, 24, max(validated_recoveries, 28)],
+                sparkline=[],
             ),
         ]
 
@@ -123,28 +123,39 @@ class DashboardService:
             node_dept = db.get(Department, n.department_id)
             department_label = node_dept.name if node_dept else "Unknown"
 
+            last_rec = (
+                latest_m.measured_at.strftime("%Y-%m-%d %H:%M:%S")
+                if latest_m and latest_m.measured_at
+                else (n.last_seen_at.strftime("%Y-%m-%d %H:%M:%S") if n.last_seen_at else "—")
+            )
+
             recent_telemetry.append(
                 RecentTelemetryItem(
                     id=n.node_id,
                     sensor_type=n.hardware_type,
                     department_id=n.department_id,
                     department_name=department_label,
-                    latest_measurement=latest_m.value if latest_m else "Nominal",
+                    latest_measurement=latest_m.value if latest_m else "—",
                     unit=latest_m.unit if latest_m else "",
                     health_status=n.status,
-                    last_received="Just now" if n.last_seen_at else "Pending",
-                    variance_score=0.04 if n.status == "healthy" else 0.82,
-                    confidence_level=99.8 if n.status == "healthy" else 94.1,
+                    last_received=last_rec,
+                    variance_score=0.0,
+                    confidence_level=100.0 if n.status in ["online", "healthy"] else 0.0,
                 )
             )
 
         # Recent activity events (derived from real nodes)
         recent_activity: List[ActivityEventItem] = []
         for idx, n in enumerate(all_nodes[:6]):
+            event_ts = (
+                n.last_seen_at.strftime("%H:%M:%S")
+                if n.last_seen_at
+                else (n.created_at.strftime("%H:%M:%S") if n.created_at else "—")
+            )
             recent_activity.append(
                 ActivityEventItem(
                     id=f"evt-{n.id}-{idx}",
-                    timestamp="Just now",
+                    timestamp=event_ts,
                     node_id=n.node_id,
                     event_type="Node Registered" if idx == 0 else "Heartbeat Received",
                     message=f"Node {n.name} ({n.node_id}) status: {n.status.upper()}",
