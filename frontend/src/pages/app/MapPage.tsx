@@ -4,37 +4,44 @@ import { NetworkTopology3D } from '../../components/3d/NetworkTopology3D';
 import { type SensorTelemetryItem } from '../../mock/dashboardData';
 import { useDepartment } from '../../context/DepartmentContext';
 import { api } from '../../services/api';
+import { useEnvironment } from '../../context/EnvironmentContext';
 
 export const MapPage: React.FC = () => {
   const { selectedDepartmentId, activeDepartment } = useDepartment();
+  const { environment } = useEnvironment();
   const [nodes, setNodes] = useState<SensorTelemetryItem[]>([]);
   const [selectedNode, setSelectedNode] = useState<SensorTelemetryItem | null>(null);
 
   useEffect(() => {
-    api.getNodes()
-      .then((apiNodes) => {
+    let active = true;
+    const refresh = () => Promise.all([api.getNodes(undefined, environment), api.getMeasurements(environment)])
+      .then(([apiNodes, measurements]) => {
+        if (!active) return;
         const mapped: SensorTelemetryItem[] = apiNodes.map((n) => ({
           id: n.node_id,
           name: n.name,
           departmentId: `dept-${n.department_id}`,
           departmentName: n.department_name || 'Plant Fleet',
-          sensorType: n.hardware_type,
           hardwareModel: n.hardware_type,
-          healthStatus: (n.status === 'connected' ? 'healthy' : n.status === 'alert' ? 'alert' : 'offline') as any,
-          latestMeasurement: 0,
-          unit: '',
-          varianceScore: '0.00',
-          lastReceived: n.last_seen_at || n.registered_at,
+          sensorChannels: n.sensor_types || [],
+          sensorType: `${n.hardware_type}${n.sensor_types?.length ? ` · ${n.sensor_types.join(', ')}` : ''}`,
+          healthStatus: (['online', 'healthy', 'connected'].includes(n.status) ? 'healthy' : ['warning', 'calibrating'].includes(n.status) ? n.status : n.status === 'alert' ? 'alert' : 'offline') as any,
+          latestMeasurement: measurements.items.find((m) => m.node_id === n.id)?.value ?? '—',
+          unit: measurements.items.find((m) => m.node_id === n.id)?.unit ?? '',
+          varianceScore: '',
+          lastReceived: n.last_seen_at || 'Never seen',
           protocol: 'MQTT',
           firmware: n.firmware_version,
-          sparkline: [0, 0, 0, 0, 0],
+          sparkline: [],
         }));
         setNodes(mapped);
+        setSelectedNode((current) => current ? mapped.find((node) => node.id === current.id) || null : null);
       })
-      .catch(() => {
-        setNodes([]);
-      });
-  }, []);
+      .catch(() => { if (active) setNodes([]); });
+    void refresh();
+    const interval = window.setInterval(refresh, 5000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [environment]);
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-200">
@@ -84,20 +91,20 @@ export const MapPage: React.FC = () => {
         </div>
       )}
 
-      {/* Topology Metrics & Physical Gateway Status Wells */}
+      {/* Topology metrics derived from the selected environment */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="clay-surface p-6 space-y-3">
           <div className="flex items-center gap-2 text-xs font-bold text-[#718096] uppercase tracking-wider">
             <Cpu className="w-4 h-4 text-[#FFD21C]" />
-            <span>Gateway Host Coordinator</span>
+            <span>Gateway Host</span>
           </div>
           <div className="text-xl font-black text-[#172238]">Raspberry Pi 5</div>
           <p className="text-xs text-[#5A687C] leading-relaxed">
             Local edge broker hosting Mosquitto MQTT & embedded SQLite with Write-Ahead Logging.
           </p>
-          <div className="pt-2 flex items-center justify-between text-xs font-mono font-bold text-[#0C5A37]">
-            <span>Coordinator State: Nominal</span>
-            <span className="bg-[#E8FAF1] px-2 py-0.5 rounded-full">Active</span>
+          <div className="pt-2 flex items-center justify-between text-xs font-mono font-bold text-[#134685]">
+            <span>Broker/store health is not queried here</span>
+            <span className="bg-[#EBF4FE] px-2 py-0.5 rounded-full">Configured</span>
           </div>
         </div>
 
@@ -106,13 +113,13 @@ export const MapPage: React.FC = () => {
             <Radio className="w-4 h-4 text-[#5BA4F5]" />
             <span>Communication Link Mesh</span>
           </div>
-          <div className="text-xl font-black text-[#172238]">{nodes.length} Nodes Synchronized</div>
+          <div className="text-xl font-black text-[#172238]">{nodes.length} Registered Nodes</div>
           <p className="text-xs text-[#5A687C] leading-relaxed">
-            Local wireless and Ethernet sensor telemetry links with automated deduplication.
+            Node status is read from the selected environment. Offline nodes have no active broker link.
           </p>
           <div className="pt-2 flex items-center justify-between text-xs font-mono font-bold text-[#134685]">
-            <span>Link State: {nodes.length > 0 ? 'Connected' : 'Standby'}</span>
-            <span className="bg-[#EBF4FE] px-2 py-0.5 rounded-full">{nodes.length} Transducers</span>
+            <span>Online: {nodes.filter((node) => node.healthStatus === 'healthy').length}</span>
+            <span className="bg-[#EBF4FE] px-2 py-0.5 rounded-full">{nodes.length} nodes total</span>
           </div>
         </div>
 
@@ -121,13 +128,13 @@ export const MapPage: React.FC = () => {
             <ShieldCheck className="w-4 h-4 text-[#78E9AD]" />
             <span>Spatial Anomaly Verification</span>
           </div>
-          <div className="text-xl font-black text-[#172238]">Neighbour Correlation Active</div>
+          <div className="text-xl font-black text-[#172238]">Channel evidence pipeline</div>
           <p className="text-xs text-[#5A687C] leading-relaxed">
-            Multi-transducer spatial cross-checking detects localized physical changes vs sensor drift.
+            Analysis compares same-node temperature, humidity, and gas channels. Cross-node recovery requires matching configured sensor location, type, and unit.
           </p>
           <div className="pt-2 flex items-center justify-between text-xs font-mono font-bold text-[#0C5A37]">
             <span>Active Department: {activeDepartment.name}</span>
-            <span className="bg-[#E8FAF1] px-2 py-0.5 rounded-full">Ready</span>
+            <span className="bg-[#E8FAF1] px-2 py-0.5 rounded-full">{environment === 'demo' ? 'Simulated' : 'Stored data'}</span>
           </div>
         </div>
       </div>

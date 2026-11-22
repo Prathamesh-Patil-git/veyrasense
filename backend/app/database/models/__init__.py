@@ -7,6 +7,8 @@ from app.database.models.measurement import Measurement
 from app.database.models.administrator import Administrator
 from app.database.models.revoked_token import RevokedToken
 from app.database.models.audit_log import AuditLog
+from app.database.models.scenario_run import ScenarioRun
+from app.database.models.research_record import ResearchRecord
 
 __all__ = [
     "Department",
@@ -17,4 +19,6 @@ __all__ = [
     "Administrator",
     "RevokedToken",
     "AuditLog",
+    "ScenarioRun",
+    "ResearchRecord",
 ]

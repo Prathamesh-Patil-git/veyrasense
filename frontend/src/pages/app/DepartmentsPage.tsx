@@ -4,16 +4,18 @@ import { useDepartment } from '../../context/DepartmentContext';
 import { DEPARTMENTS } from '../../mock/dashboardData';
 import { api, type ApiNode } from '../../services/api';
 import { Button } from '../../components/ui/Button';
+import { useEnvironment } from '../../context/EnvironmentContext';
 
 export const DepartmentsPage: React.FC = () => {
   const { setSelectedDepartmentId } = useDepartment();
+  const { environment } = useEnvironment();
   const [nodes, setNodes] = useState<ApiNode[]>([]);
 
   useEffect(() => {
-    api.getNodes()
+    api.getNodes(undefined, environment)
       .then((data) => setNodes(data))
       .catch(() => setNodes([]));
-  }, []);
+  }, [environment]);
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-200">

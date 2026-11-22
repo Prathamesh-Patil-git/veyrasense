@@ -79,6 +79,7 @@ export interface SensorTelemetryItem {
   firmware: string;
   sparkline: number[];
   hardwareModel: string;
+  sensorChannels?: string[];
 }
 
 // Global empty state: All operational data must come from real backend responses

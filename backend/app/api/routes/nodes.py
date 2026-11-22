@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from app.database.connection import get_db
@@ -25,6 +25,7 @@ router = APIRouter(prefix="/nodes", tags=["Sensor Nodes"])
 def get_sensor_nodes(
     department_id: Optional[int] = Query(None, description="Filter nodes by department ID"),
     status: Optional[str] = Query(None, description="Filter by status (online, warning, alert, etc.)"),
+    environment: Literal["real", "demo"] = Query("real"),
     limit: int = Query(100, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -38,6 +39,7 @@ def get_sensor_nodes(
         db,
         department_id=department_id,
         status=status,
+        environment=environment,
         limit=limit,
         offset=offset,
     )

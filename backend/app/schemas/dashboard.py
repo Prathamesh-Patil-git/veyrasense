@@ -23,8 +23,8 @@ class RecentTelemetryItem(BaseModel):
     unit: str
     health_status: str  # healthy, warning, alert, offline, calibrating
     last_received: str
-    variance_score: float = 0.0
-    confidence_level: float = 99.4
+    variance_score: Optional[float] = None
+    confidence_level: Optional[float] = None
 
 
 class ActivityEventItem(BaseModel):
@@ -38,6 +38,7 @@ class ActivityEventItem(BaseModel):
 
 
 class DashboardOverviewResponse(BaseModel):
+    environment: str = "real"
     registered_nodes: int
     online_nodes: int
     active_investigations: int

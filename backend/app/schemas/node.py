@@ -27,6 +27,8 @@ class NodeUpdate(BaseModel):
 
 
 class NodeResponse(NodeBase):
+    environment: str = Field(default="real", pattern=r"^(real|demo)$")
+    sensor_types: List[str] = Field(default_factory=list)
     id: int
     is_active: bool
     registered_at: datetime

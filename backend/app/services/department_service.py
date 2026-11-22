@@ -11,7 +11,7 @@ class DepartmentService:
 
     @staticmethod
     def list_departments(
-        db: Session, active_only: bool = False
+        db: Session, active_only: bool = False, environment: str = "real"
     ) -> List[DepartmentWithCountResponse]:
         stmt = select(Department)
         if active_only:
@@ -38,11 +38,12 @@ class DepartmentService:
         for dept in departments:
             # Query counts
             node_count = db.scalar(
-                select(func.count(SensorNode.id)).where(SensorNode.department_id == dept.id)
+                select(func.count(SensorNode.id)).where(SensorNode.department_id == dept.id, SensorNode.environment == environment)
             ) or 0
             online_count = db.scalar(
                 select(func.count(SensorNode.id)).where(
                     SensorNode.department_id == dept.id,
+                    SensorNode.environment == environment,
                     SensorNode.status.in_(["online", "healthy"]),
                 )
             ) or 0

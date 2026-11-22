@@ -25,6 +25,7 @@ import { MLModelPage } from '../pages/app/MLModelPage';
 import { AnalyticsPage } from '../pages/app/AnalyticsPage';
 import { AuditPage } from '../pages/app/AuditPage';
 import { SettingsPage } from '../pages/app/SettingsPage';
+import { DemonstrationPage } from '../pages/app/DemonstrationPage';
 
 // Shared Public Website Layout
 const PublicLayout: React.FC = () => {
@@ -79,6 +80,7 @@ export const AppRoutes: React.FC = () => {
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="audit" element={<AuditPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="demonstration" element={<DemonstrationPage />} />
       </Route>
 
       {/* Fallback route */}

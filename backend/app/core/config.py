@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     MQTT_BROKER_PORT: int = 1883
     MQTT_BACKEND_USERNAME: str = "veyrasense_backend"
     MQTT_BACKEND_PASSWORD: str = "veyrasense_internal_backend_key_secure"
+    ANOMALY_TEMPERATURE_STEP_DELTA: float = 10.0
+    ANOMALY_OTHER_STEP_DELTA: float = 20.0
+    ANOMALY_GAP_SECONDS: int = 300
     MOSQUITTO_CONFIG_DIR: Path = Field(default=Path("data/mosquitto"))
 
     # Production Server & Process Tuning

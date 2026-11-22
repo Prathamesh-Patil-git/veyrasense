@@ -1,5 +1,5 @@
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Literal
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.database.connection import get_db
 from app.database.models.administrator import Administrator
@@ -13,6 +13,7 @@ router = APIRouter(prefix="/departments", tags=["Departments"])
 @router.get("", response_model=List[DepartmentWithCountResponse])
 def get_departments(
     active_only: bool = False,
+    environment: Literal["real", "demo"] = Query("real"),
     db: Session = Depends(get_db),
     _: Administrator = Depends(get_current_admin),
 ):
@@ -20,7 +21,7 @@ def get_departments(
 
     Requires Administrator Authentication.
     """
-    return DepartmentService.list_departments(db, active_only=active_only)
+    return DepartmentService.list_departments(db, active_only=active_only, environment=environment)
 
 
 @router.post("", response_model=DepartmentResponse, status_code=status.HTTP_201_CREATED)

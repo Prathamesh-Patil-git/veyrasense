@@ -39,6 +39,7 @@ class NodeService:
         db: Session,
         department_id: Optional[int] = None,
         status: Optional[str] = None,
+        environment: str = "real",
         limit: int = 100,
         offset: int = 0,
     ) -> List[NodeResponse]:
@@ -50,6 +51,7 @@ class NodeService:
             stmt = stmt.where(SensorNode.department_id == department_id)
         if status:
             stmt = stmt.where(SensorNode.status == status)
+        stmt = stmt.where(SensorNode.environment == environment)
 
         stmt = stmt.order_by(SensorNode.id.asc()).limit(limit).offset(offset)
         rows = db.execute(stmt).all()
@@ -57,6 +59,7 @@ class NodeService:
         responses: List[NodeResponse] = []
         for node, dept_name in rows:
             resp = NodeResponse.model_validate(node)
+            resp.sensor_types = sorted({sensor.profile.name for sensor in node.sensors if sensor.profile})
             resp.department_name = dept_name
             resp.has_api_key = bool(node.api_key_hash)
             responses.append(resp)

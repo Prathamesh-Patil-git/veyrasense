@@ -3,13 +3,17 @@ import { Database, Filter, Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api, type ApiNode } from '../../services/api';
 import { Button } from '../../components/ui/Button';
+import { useEnvironment } from '../../context/EnvironmentContext';
 
 export const DataExplorerPage: React.FC = () => {
+  const { environment } = useEnvironment();
   const [nodes, setNodes] = useState<ApiNode[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string>('');
+  const [measurements, setMeasurements] = useState<Awaited<ReturnType<typeof api.getMeasurements>>['items']>([]);
+  const [selectedType, setSelectedType] = useState('');
 
   useEffect(() => {
-    api.getNodes()
+    api.getNodes(undefined, environment)
       .then((data) => {
         setNodes(data);
         if (data.length > 0) {
@@ -19,7 +23,22 @@ export const DataExplorerPage: React.FC = () => {
       .catch(() => {
         setNodes([]);
       });
-  }, []);
+  }, [environment]);
+
+  useEffect(() => {
+    const selectedNode = nodes.find((node) => node.node_id === selectedNodeId);
+    if (!selectedNode) { setMeasurements([]); return; }
+    api.getMeasurements(environment, selectedNode.id).then((data) => {
+      setMeasurements(data.items);
+      setSelectedType((current) => current && data.items.some((item) => item.measurement_type === current) ? current : data.items[0]?.measurement_type || '');
+    }).catch(() => setMeasurements([]));
+  }, [nodes, selectedNodeId, environment]);
+
+  const selectedMeasurements = [...measurements].filter((item) => !selectedType || item.measurement_type === selectedType).reverse();
+  const values = selectedMeasurements.map((item) => item.value);
+  const minValue = Math.min(...values, 0);
+  const maxValue = Math.max(...values, 1);
+  const chartPoints = values.map((value, index) => `${values.length > 1 ? (index / (values.length - 1)) * 980 + 10 : 500},${220 - ((value - minValue) / Math.max(maxValue - minValue, 1)) * 200}`).join(' ');
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-200">
@@ -76,7 +95,8 @@ export const DataExplorerPage: React.FC = () => {
                 ))}
               </select>
 
-              <span className="text-[#718096]">Window: Last 24 Hours</span>
+              <span className="text-[#718096]">Window: Latest 100 records</span>
+              <select aria-label="Measurement type" value={selectedType} onChange={(e) => setSelectedType(e.target.value)} className="rounded-xl border px-3 py-1.5 text-xs"><option value="">All types</option>{[...new Set(measurements.map((item) => item.measurement_type))].map((type) => <option key={type} value={type}>{type}</option>)}</select>
             </div>
 
             <div className="flex items-center gap-2">
@@ -94,13 +114,7 @@ export const DataExplorerPage: React.FC = () => {
               <span className="text-[10px] text-[#718096] font-mono">SQLite Ingestion Store</span>
             </div>
 
-            <div className="h-64 w-full clay-recessed p-8 flex flex-col items-center justify-center text-center space-y-2">
-              <Database className="w-8 h-8 text-[#718096]" />
-              <div className="font-bold text-sm text-[#172238]">No Telemetry Captured in Selected Window</div>
-              <p className="text-xs text-[#718096] max-w-sm">
-                Timeseries samples will render here as the node transmits telemetry via MQTT.
-              </p>
-            </div>
+            {selectedMeasurements.length === 0 ? <div className="rounded-xl bg-slate-50 p-8 text-center text-sm text-slate-500">No measurements stored for this node and type in the selected environment.</div> : <><div className="rounded-xl bg-slate-50 p-4"><p className="mb-2 text-[10px] font-bold uppercase text-slate-500">Stored {selectedType} values · {selectedMeasurements[0].unit}</p><svg role="img" aria-label={`${selectedType} measurement history`} viewBox="0 0 1000 240" className="h-48 w-full"><line x1="10" y1="220" x2="990" y2="220" stroke="#cbd5e1"/><polyline points={chartPoints} fill="none" stroke="#1686a5" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round"/>{values.map((value, index) => <circle key={selectedMeasurements[index].id} cx={values.length > 1 ? (index / (values.length - 1)) * 980 + 10 : 500} cy={220 - ((value - minValue) / Math.max(maxValue - minValue, 1)) * 200} r="4" fill="#1686a5"/>)}</svg><div className="flex justify-between text-[10px] text-slate-500"><span>{new Date(selectedMeasurements[0].measured_at).toLocaleString()}</span><span>{new Date(selectedMeasurements[selectedMeasurements.length - 1].measured_at).toLocaleString()}</span></div></div><div className="max-h-96 overflow-auto rounded-xl bg-slate-50"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr><th className="p-3">Measured at</th><th className="p-3">Type</th><th className="p-3">Value</th><th className="p-3">Quality</th></tr></thead><tbody>{selectedMeasurements.slice().reverse().map((item) => <tr key={item.id} className="border-t border-slate-200"><td className="p-3">{new Date(item.measured_at).toLocaleString()}</td><td className="p-3">{item.measurement_type}</td><td className="p-3 font-mono">{item.value} {item.unit}</td><td className="p-3">{item.quality}</td></tr>)}</tbody></table></div></>}
           </div>
         </>
       )}

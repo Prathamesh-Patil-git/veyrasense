@@ -16,7 +16,7 @@ class MeasurementService:
     """Universal measurement ingestion and bounded paginated queries."""
 
     @staticmethod
-    def ingest_measurement(db: Session, data: MeasurementCreate) -> Measurement:
+    def ingest_measurement(db: Session, data: MeasurementCreate, environment: str = "real") -> Measurement:
         existing = db.scalar(
             select(Measurement).where(Measurement.message_uid == data.message_uid)
         )
@@ -33,8 +33,12 @@ class MeasurementService:
             measured_at=data.measured_at,
             quality=data.quality,
             source_type=data.source_type,
+            environment=environment,
         )
         db.add(measurement)
+        db.flush()
+        from app.services.research_service import ResearchService
+        ResearchService.analyze_measurement(db, measurement)
 
         # Update node's last seen
         node = db.get(SensorNode, data.node_id)
@@ -53,6 +57,7 @@ class MeasurementService:
         from_time: Optional[datetime] = None,
         to_time: Optional[datetime] = None,
         quality: Optional[str] = None,
+        environment: str = "real",
         limit: int = 50,
         offset: int = 0,
     ) -> PaginatedMeasurementsResponse:
@@ -69,6 +74,7 @@ class MeasurementService:
         ).join(
             Department, SensorNode.department_id == Department.id
         )
+        stmt = stmt.where(Measurement.environment == environment)
 
         if node_id is not None:
             stmt = stmt.where(Measurement.node_id == node_id)
@@ -82,7 +88,7 @@ class MeasurementService:
             stmt = stmt.where(Measurement.quality == quality)
 
         # Total count
-        count_stmt = select(func.count(Measurement.id))
+        count_stmt = select(func.count(Measurement.id)).where(Measurement.environment == environment)
         if node_id is not None:
             count_stmt = count_stmt.where(Measurement.node_id == node_id)
         if measurement_type:

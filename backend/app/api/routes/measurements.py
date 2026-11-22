@@ -1,6 +1,6 @@
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from app.database.connection import get_db
@@ -31,6 +31,7 @@ def get_measurements(
     from_time: Optional[datetime] = Query(None, description="ISO timestamp start filter"),
     to_time: Optional[datetime] = Query(None, description="ISO timestamp end filter"),
     quality: Optional[str] = Query(None, description="Quality indicator filter (good, suspect, synthetic_recovery)"),
+    environment: Literal["real", "demo"] = Query("real"),
     limit: int = Query(50, ge=1, le=100, description="Page limit (max 100 for edge memory bounds)"),
     offset: int = Query(0, ge=0, description="Offset cursor for pagination"),
     db: Session = Depends(get_db),
@@ -47,6 +48,7 @@ def get_measurements(
         from_time=from_time,
         to_time=to_time,
         quality=quality,
+        environment=environment,
         limit=limit,
         offset=offset,
     )
@@ -95,6 +97,8 @@ def ingest_measurement(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Target sensor node ID {data.node_id} does not exist.",
         )
+    if node.environment != "real":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="HTTP telemetry ingestion is reserved for real sensor nodes.")
 
     # 5. Cross-node validation: verify sensor belongs to target node
     if data.sensor_id is not None:

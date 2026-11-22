@@ -129,6 +129,7 @@ def seed_database():
                     registered_at=now - timedelta(days=14),
                     last_seen_at=now - timedelta(minutes=2),
                     is_active=True,
+                    environment="demo",
                 )
                 db.add(node)
                 db.flush()
@@ -145,6 +146,7 @@ def seed_database():
                     received_at=now,
                     quality="good" if status == "healthy" else "suspect" if status == "alert" else "synthetic_recovery",
                     source_type="telemetry" if status != "alert" else "challenge_response",
+                    environment="demo",
                 )
                 db.add(meas)
 

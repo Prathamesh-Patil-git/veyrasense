@@ -26,8 +26,15 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
 
   const [activeNode, setActiveNode] = useState<SensorTelemetryItem | null>(null);
   const [isRotating, setIsRotating] = useState(true);
-  const [filterStatus, setFilterStatus] = useState<'all' | 'healthy' | 'alert'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'healthy' | 'attention' | 'offline'>('all');
   const [webGlSupported, setWebGlSupported] = useState<boolean>(true);
+  const isRotatingRef = useRef(isRotating);
+  const activeNodeRef = useRef(activeNode);
+  const onSelectNodeRef = useRef(onSelectNode);
+
+  useEffect(() => { isRotatingRef.current = isRotating; }, [isRotating]);
+  useEffect(() => { activeNodeRef.current = activeNode; }, [activeNode]);
+  useEffect(() => { onSelectNodeRef.current = onSelectNode; }, [onSelectNode]);
 
   // Filter nodes based on selected department and status
   const visibleNodes = useMemo(() => {
@@ -40,8 +47,10 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
         filterStatus === 'all'
           ? true
           : filterStatus === 'healthy'
-          ? n.healthStatus === 'healthy' || n.healthStatus === 'calibrating'
-          : n.healthStatus === 'alert' || n.healthStatus === 'warning';
+          ? n.healthStatus === 'healthy'
+          : filterStatus === 'attention'
+            ? n.healthStatus === 'alert' || n.healthStatus === 'warning' || n.healthStatus === 'calibrating'
+            : n.healthStatus === 'offline';
       return matchDept && matchStatus;
     });
   }, [nodes, selectedDepartmentId, filterStatus]);
@@ -214,8 +223,78 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
       if (node.healthStatus === 'warning' || node.healthStatus === 'calibrating') nodeColor = 0xffd21c; // Yellow
       if (node.healthStatus === 'alert' || node.healthStatus === 'offline') nodeColor = 0xef6461; // Red
 
-      // Different physical sensor transducer geometry by type
-      if (node.sensorType.toLowerCase().includes('pressure')) {
+      // ESP32-WROOM-32 development board with the actual configured DHT11 / MQ-135 modules.
+      const channelNames = (node.sensorChannels || []).join(' ').toLowerCase();
+      const hasDht = channelNames.includes('dht') || channelNames.includes('temperature') || channelNames.includes('humidity');
+      const hasMq135 = channelNames.includes('mq-135') || channelNames.includes('mq135') || channelNames.includes('gas');
+      if (node.hardwareModel.toLowerCase().includes('esp32')) {
+        const pcb = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.1, 1.3), new THREE.MeshStandardMaterial({ color: 0x176b55, roughness: 0.58, metalness: 0.12 }));
+        pcb.position.set(0, 0.34, 0);
+        nodeGroup.add(pcb);
+
+        const module = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.16, 0.62), new THREE.MeshStandardMaterial({ color: 0xadb6c3, metalness: 0.78, roughness: 0.24 }));
+        module.position.set(0, 0.48, -0.12);
+        nodeGroup.add(module);
+        const antenna = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.04, 0.24), new THREE.MeshStandardMaterial({ color: 0xd7dce3, metalness: 0.35, roughness: 0.4 }));
+        antenna.position.set(0, 0.59, -0.55);
+        nodeGroup.add(antenna);
+
+        const pinMaterial = new THREE.MeshStandardMaterial({ color: 0xd4a545, metalness: 0.86, roughness: 0.25 });
+        [-1, 1].forEach((side) => {
+          for (let pin = 0; pin < 12; pin += 1) {
+            const pinMesh = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.22, 0.035), pinMaterial);
+            pinMesh.position.set(side * 0.83, 0.28, -0.52 + pin * 0.088);
+            nodeGroup.add(pinMesh);
+          }
+        });
+
+        const wire = (points: [number, number, number][], color: number) => {
+          const curve = new THREE.CatmullRomCurve3(points.map(([px, py, pz]) => new THREE.Vector3(px, py, pz)));
+          const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 14, 0.025, 6, false), new THREE.MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.12 }));
+          nodeGroup.add(tube);
+        };
+        if (hasDht) {
+          const dhtBoard = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.08, 0.62), new THREE.MeshStandardMaterial({ color: 0x1686a5, roughness: 0.55 }));
+          dhtBoard.position.set(-1.22, 0.28, 0.72);
+          nodeGroup.add(dhtBoard);
+          const dhtBody = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.56, 0.42), new THREE.MeshStandardMaterial({ color: 0x255f9e, roughness: 0.48 }));
+          dhtBody.position.set(-1.22, 0.59, 0.72);
+          nodeGroup.add(dhtBody);
+          for (let vent = -1; vent <= 1; vent += 1) {
+            const groove = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.34, 0.025), new THREE.MeshBasicMaterial({ color: 0x142c48 }));
+            groove.position.set(-1.22 + vent * 0.1, 0.59, 0.937);
+            nodeGroup.add(groove);
+          }
+          wire([[-0.82, 0.35, 0.3], [-0.92, 0.5, 0.6], [-1.04, 0.31, 0.72]], 0xff4d42); // 3V3
+          wire([[-0.82, 0.31, 0.4], [-0.96, 0.2, 0.84], [-1.04, 0.28, 0.72]], 0x222936); // GND
+          wire([[-0.82, 0.38, 0.12], [-0.94, 0.72, 0.35], [-1.04, 0.31, 0.72]], 0xffd21c); // GPIO32 data
+        }
+        if (hasMq135) {
+          const mqBoard = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.08, 0.7), new THREE.MeshStandardMaterial({ color: 0x1686a5, roughness: 0.55 }));
+          mqBoard.position.set(1.26, 0.27, 0.72);
+          nodeGroup.add(mqBoard);
+          const can = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.36, 0.62, 24), new THREE.MeshStandardMaterial({ color: 0xc5ccd4, metalness: 0.82, roughness: 0.3 }));
+          can.position.set(1.26, 0.63, 0.72);
+          nodeGroup.add(can);
+          const meshTop = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.28, 0.06, 24), new THREE.MeshStandardMaterial({ color: 0x82909e, metalness: 0.72, roughness: 0.45, wireframe: true }));
+          meshTop.position.set(1.26, 0.96, 0.72);
+          nodeGroup.add(meshTop);
+          // Visible two-resistor divider between the 5 V MQ-135 output and ESP32 ADC.
+          for (let resistor = 0; resistor < 2; resistor += 1) {
+            const r = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.24, 12), new THREE.MeshStandardMaterial({ color: resistor ? 0xd5c6a3 : 0xddd6c8, roughness: 0.72 }));
+            r.position.set(0.62 + resistor * 0.18, 0.39, 0.72);
+            nodeGroup.add(r);
+          }
+          wire([[0.82, 0.34, 0.42], [1.0, 0.28, 0.72], [0.54, 0.35, 0.72], [0.82, 0.4, 0.05]], 0x5ba4f5); // AO -> divider -> GPIO34
+          wire([[0.82, 0.35, 0.36], [1.08, 0.18, 0.98], [1.0, 0.28, 0.72]], 0x222936); // common ground
+          wire([[0.82, 0.38, 0.45], [1.45, 0.2, 1.05], [1.4, 0.28, 0.72]], 0xff4d42); // module supply
+        }
+        if (!hasDht && !hasMq135) {
+          const genericSensor = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 0.55, 20), new THREE.MeshStandardMaterial({ color: 0xd9dde5, metalness: 0.55, roughness: 0.3 }));
+          genericSensor.position.set(0, 0.68, 0.82);
+          nodeGroup.add(genericSensor);
+        }
+      } else if (node.sensorType.toLowerCase().includes('pressure')) {
         // Cylindrical hydraulic pressure cell with hex base
         const hexGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.25, 6);
         const hexMat = new THREE.MeshStandardMaterial({ color: 0x4a5568, metalness: 0.7, roughness: 0.3 });
@@ -289,7 +368,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
       const points = curve.getPoints(32);
       const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
       const lineMat = new THREE.LineBasicMaterial({
-        color: node.healthStatus === 'alert' ? 0xef6461 : 0x2f4a7a,
+        color: nodeColor,
         transparent: true,
         opacity: 0.5,
       });
@@ -299,7 +378,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
       // Animated Pulse Packet particle flowing along the arc
       const pulseGeo = new THREE.SphereGeometry(0.12, 12, 12);
       const pulseMat = new THREE.MeshBasicMaterial({
-        color: node.healthStatus === 'alert' ? 0xef6461 : 0x78e9ad,
+        color: nodeColor,
       });
       const pulseMesh = new THREE.Mesh(pulseGeo, pulseMat);
       scene.add(pulseMesh);
@@ -308,7 +387,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
         mesh: pulseMesh,
         curve,
         progress: (i * 0.23) % 1.0,
-        speed: 0.003 + (i % 3) * 0.0015,
+        speed: node.healthStatus === 'offline' ? 0 : 0.003 + (i % 3) * 0.0015,
       });
     });
 
@@ -375,7 +454,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
         if (parent && parent.userData?.nodeData) {
           const clickedNode = parent.userData.nodeData as SensorTelemetryItem;
           setActiveNode(clickedNode);
-          if (onSelectNode) onSelectNode(clickedNode);
+          if (onSelectNodeRef.current) onSelectNodeRef.current(clickedNode);
         }
       }
     };
@@ -403,7 +482,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
       const elapsedTime = clock.getElapsedTime();
 
       // Auto rotation when enabled and not dragging
-      if (isRotating && !isDragging) {
+      if (isRotatingRef.current && !isDragging) {
         targetRotationY += 0.0025;
       }
 
@@ -432,7 +511,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
 
       // Subtle float animation on selected node
       nodeMeshes.forEach((item) => {
-        if (activeNode && item.data.id === activeNode.id) {
+        if (activeNodeRef.current && item.data.id === activeNodeRef.current.id) {
           item.mesh.position.y = 0.4 + Math.sin(elapsedTime * 4) * 0.15;
         } else {
           item.mesh.position.y = 0;
@@ -466,9 +545,15 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
       window.removeEventListener('touchmove', handlePointerMove);
       window.removeEventListener('touchend', handlePointerUp);
       canvas.removeEventListener('wheel', handleWheel);
+      scene.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        mesh.geometry?.dispose?.();
+        if (Array.isArray(mesh.material)) mesh.material.forEach((material) => material.dispose());
+        else mesh.material?.dispose?.();
+      });
       renderer.dispose();
     };
-  }, [visibleNodes, isRotating, activeNode, onSelectNode]);
+  }, [visibleNodes]);
 
   return (
     <div className={`relative rounded-3xl overflow-hidden clay-dark text-white ${className}`}>
@@ -495,7 +580,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
               >
                 <div className="flex justify-between items-center text-xs font-mono font-bold text-white">
                   <span>{node.id}</span>
-                  <span className="w-2 h-2 rounded-full bg-[#78E9AD]" />
+                  <span className={`w-2 h-2 rounded-full ${node.healthStatus === 'offline' || node.healthStatus === 'alert' ? 'bg-[#EF6461]' : node.healthStatus === 'warning' ? 'bg-[#FFD21C]' : 'bg-[#78E9AD]'}`} />
                 </div>
                 <div className="text-[11px] text-slate-300 truncate mt-1">{node.sensorType}</div>
                 <div className="text-[10px] text-[#FFD21C] mt-2 font-semibold">
@@ -510,10 +595,10 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
       {/* Top Overlay Bar: Gateway Indicator & View Controls */}
       <div className="absolute top-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none z-10">
         <div className="pointer-events-auto flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#172238]/85 backdrop-blur-md border border-[#2B3E63] text-xs font-semibold shadow-md">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#78E9AD] animate-pulse" />
+                <span className={`w-2.5 h-2.5 rounded-full ${visibleNodes.some((node) => node.healthStatus === 'offline' || node.healthStatus === 'alert') ? 'bg-[#EF6461]' : visibleNodes.some((node) => node.healthStatus === 'warning' || node.healthStatus === 'calibrating') ? 'bg-[#FFD21C]' : 'bg-[#78E9AD]'} animate-pulse`} />
           <span className="text-slate-200">RPi 5 Central Gateway Coordinator</span>
           <span className="text-[10px] font-mono text-slate-400 pl-1 border-l border-slate-700">
-            {visibleNodes.length} Nodes Active
+            {visibleNodes.length} Nodes
           </span>
         </div>
 
@@ -533,7 +618,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
 
           <button
             onClick={() => {
-              setFilterStatus((prev) => (prev === 'all' ? 'healthy' : prev === 'healthy' ? 'alert' : 'all'));
+              setFilterStatus((prev) => (prev === 'all' ? 'healthy' : prev === 'healthy' ? 'attention' : prev === 'attention' ? 'offline' : 'all'));
             }}
             className="px-2.5 py-1.5 rounded-xl text-[11px] font-semibold text-slate-300 hover:bg-[#253554] transition-colors"
           >
@@ -548,7 +633,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
           <div className="p-4 rounded-3xl bg-[#172238]/95 backdrop-blur-md border border-[#2B3E63] shadow-xl text-xs space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-[#253554]">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#78E9AD]" />
+                <span className={`w-2.5 h-2.5 rounded-full ${activeNode.healthStatus === 'offline' || activeNode.healthStatus === 'alert' ? 'bg-[#EF6461]' : activeNode.healthStatus === 'warning' ? 'bg-[#FFD21C]' : 'bg-[#78E9AD]'}`} />
                 <span className="font-mono font-bold text-white text-sm">{activeNode.id}</span>
                 <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-[#E8FAF1] text-[#0C5A37]">
                   {activeNode.healthStatus}
@@ -580,7 +665,7 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
               <div>
                 <span className="text-[10px] uppercase text-slate-400 block">Confidence</span>
                 <span className="font-mono font-semibold text-[#78E9AD]">
-                  {(100 - parseFloat(activeNode.varianceScore || '0.5') * 10).toFixed(1)}%
+                  {activeNode.varianceScore || 'Not assessed'}
                 </span>
               </div>
             </div>
@@ -588,10 +673,11 @@ export const NetworkTopology3D: React.FC<NetworkTopology3DProps> = ({
             <div className="pt-2 border-t border-[#253554] flex items-center justify-between text-[11px] text-slate-400">
               <span className="flex items-center gap-1.5">
                 <Radio className="w-3.5 h-3.5 text-[#5BA4F5]" />
-                <span>Mesh Link: <strong>-68 dBm</strong></span>
+                <span>MQTT status: <strong>{activeNode.healthStatus}</strong></span>
               </span>
               <span>Updated: {activeNode.lastReceived}</span>
             </div>
+            {activeNode.sensorChannels?.length ? <div className="border-t border-[#253554] pt-2 text-[10px] text-slate-300"><b className="text-white">Hardware wiring:</b> {activeNode.sensorChannels.some((channel) => /dht|temperature|humidity/i.test(channel)) && 'DHT11 data → GPIO32 · 3.3 V'}{activeNode.sensorChannels.some((channel) => /mq-?135|gas/i.test(channel)) && `${activeNode.sensorChannels.some((channel) => /dht|temperature|humidity/i.test(channel)) ? ' · ' : ''}MQ-135 module-rated supply · AO → voltage divider → GPIO34 (≤3.3 V ADC)`}</div> : null}
           </div>
         </div>
       ) : (

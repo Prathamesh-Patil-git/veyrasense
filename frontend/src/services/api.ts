@@ -23,6 +23,8 @@ export interface ApiDepartment {
 }
 
 export interface ApiNode {
+  environment: 'real' | 'demo';
+  sensor_types?: string[];
   id: number;
   node_id: string;
   name: string;
@@ -141,8 +143,8 @@ export interface ApiRecentTelemetry {
   unit: string;
   health_status: 'healthy' | 'warning' | 'alert' | 'calibrating' | 'offline';
   last_received: string;
-  variance_score: number;
-  confidence_level: number;
+  variance_score?: number | null;
+  confidence_level?: number | null;
 }
 
 export interface ApiActivityEvent {
@@ -156,6 +158,7 @@ export interface ApiActivityEvent {
 }
 
 export interface ApiDashboardOverview {
+  environment: 'real' | 'demo';
   registered_nodes: number;
   online_nodes: number;
   active_investigations: number;
@@ -171,6 +174,48 @@ export interface ApiDashboardOverview {
   recent_activity: ApiActivityEvent[];
   server_time: string;
   is_live_backend: boolean;
+}
+
+export interface ApiScenario {
+  id: string;
+  name: string;
+  fault?: string | null;
+  expected: string;
+  duration_steps: number;
+  hypotheses: Record<string, number>;
+}
+export interface ApiScenarioRun {
+  id: number;
+  scenario_id: string;
+  node_id: string;
+  environment: 'demo';
+  status: string;
+  step_index: number;
+  duration_steps: number;
+  speed: number;
+  expected: { name: string; expected: string; hypotheses: Record<string, number> };
+  actual?: { detected_anomalies: string[]; hypotheses: string[]; recovery_decisions: string[]; trusted_measurements: number; evidence_records: number };
+}
+export interface ApiResearchRecord {
+  id: number;
+  environment: 'real' | 'demo';
+  record_type: string;
+  node_id: string;
+  measurement_id?: number | null;
+  related_record_id?: number | null;
+  payload: Record<string, any>;
+  created_at: string;
+}
+export interface ApiResearchSummary {
+  environment: 'real' | 'demo'; measurements: number; anomalies: number; hypothesis_analyses: number;
+  evidence_records: number; active_investigations: number; response_fingerprints: number;
+  recovery_candidates: number; recovery_validation: Record<string, number>;
+  trusted_measurements: number; trusted_measurement_coverage: number | null;
+  evaluation: Record<string, number | string | null> | null;
+}
+export interface ApiMeasurement {
+  id: number; node_id: number; node_identifier?: string; measurement_type: string; value: number;
+  unit: string; measured_at: string; environment: 'real' | 'demo'; quality: string;
 }
 
 export interface TokenResponse {
@@ -275,12 +320,14 @@ class ApiService {
     return this.request<ApiHealth>('/health');
   }
 
-  async getDepartments(): Promise<ApiDepartment[]> {
-    return this.request<ApiDepartment[]>('/departments');
+  async getDepartments(environment: 'real' | 'demo' = 'real'): Promise<ApiDepartment[]> {
+    return this.request<ApiDepartment[]>(`/departments?environment=${environment}`);
   }
 
-  async getNodes(departmentId?: number | string): Promise<ApiNode[]> {
-    const query = departmentId && departmentId !== 'all' ? `?department_id=${departmentId}` : '';
+  async getNodes(departmentId?: number | string, environment: 'real' | 'demo' = 'real'): Promise<ApiNode[]> {
+    const params = new URLSearchParams({ environment });
+    if (departmentId && departmentId !== 'all') params.set('department_id', String(departmentId));
+    const query = `?${params.toString()}`;
     return this.request<ApiNode[]>(`/nodes${query}`);
   }
 
@@ -291,9 +338,40 @@ class ApiService {
     });
   }
 
-  async getDashboardOverview(departmentId?: number | string): Promise<ApiDashboardOverview> {
-    const query = departmentId && departmentId !== 'all' ? `?department_id=${departmentId}` : '';
+  async getDashboardOverview(departmentId?: number | string, environment: 'real' | 'demo' = 'real'): Promise<ApiDashboardOverview> {
+    const params = new URLSearchParams({ environment });
+    if (departmentId && departmentId !== 'all') params.set('department_id', String(departmentId));
+    const query = `?${params.toString()}`;
     return this.request<ApiDashboardOverview>(`/dashboard/overview${query}`);
+  }
+
+  async getScenarios(): Promise<ApiScenario[]> {
+    return this.request<ApiScenario[]>('/scenarios');
+  }
+  async startScenario(scenarioId: string, speed = 1): Promise<ApiScenarioRun> {
+    return this.request<ApiScenarioRun>('/scenarios/runs', { method: 'POST', body: JSON.stringify({ scenario_id: scenarioId, speed }) });
+  }
+  async getScenarioRuns(): Promise<ApiScenarioRun[]> {
+    return this.request<ApiScenarioRun[]>('/scenarios/runs?limit=50');
+  }
+  async controlScenario(runId: number, command: 'pause' | 'resume' | 'stop' | 'reset' | 'replay', speed?: number): Promise<ApiScenarioRun> {
+    return this.request<ApiScenarioRun>(`/scenarios/runs/${runId}/control`, { method: 'POST', body: JSON.stringify({ command, speed }) });
+  }
+  async stepScenario(runId: number): Promise<ApiScenarioRun> {
+    return this.request<ApiScenarioRun>(`/scenarios/runs/${runId}/step`, { method: 'POST' });
+  }
+  async getResearchRecords(environment: 'real' | 'demo', recordType?: string): Promise<ApiResearchRecord[]> {
+    const params = new URLSearchParams({ environment });
+    if (recordType) params.set('record_type', recordType);
+    return this.request<ApiResearchRecord[]>(`/research/records?${params.toString()}`);
+  }
+  async getResearchSummary(environment: 'real' | 'demo'): Promise<ApiResearchSummary> {
+    return this.request<ApiResearchSummary>(`/research/summary?environment=${environment}`);
+  }
+  async getMeasurements(environment: 'real' | 'demo', nodeId?: number): Promise<{ total: number; items: ApiMeasurement[] }> {
+    const params = new URLSearchParams({ environment, limit: '100' });
+    if (nodeId != null) params.set('node_id', String(nodeId));
+    return this.request<{ total: number; items: ApiMeasurement[] }>(`/measurements?${params.toString()}`);
   }
 
   async provisionNode(data: ApiNodeProvisionRequest): Promise<ApiNodeProvisionResponse> {

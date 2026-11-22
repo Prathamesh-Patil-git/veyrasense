@@ -1,17 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Activity, Zap, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { api, type ApiNode } from '../../services/api';
+import { api, type ApiNode, type ApiResearchRecord } from '../../services/api';
 import { StatusBadge } from '../../components/dashboard-kit/StatusBadge';
 import { Button } from '../../components/ui/Button';
+import { useEnvironment } from '../../context/EnvironmentContext';
 
 export const InvestigationsPage: React.FC = () => {
+  const { environment } = useEnvironment();
   const [nodes, setNodes] = useState<ApiNode[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [research, setResearch] = useState<ApiResearchRecord[]>([]);
 
   useEffect(() => {
     let mounted = true;
-    api.getNodes()
+    api.getNodes(undefined, environment)
       .then((data) => {
         if (mounted) {
           setNodes(data);
@@ -27,7 +30,16 @@ export const InvestigationsPage: React.FC = () => {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [environment]);
+
+  useEffect(() => {
+    Promise.all([
+      api.getResearchRecords(environment, 'anomaly'),
+      api.getResearchRecords(environment, 'hypothesis_analysis'),
+      api.getResearchRecords(environment, 'investigation'),
+      api.getResearchRecords(environment, 'response_fingerprint'),
+    ]).then((groups) => setResearch(groups.flat())).catch(() => setResearch([]));
+  }, [environment]);
 
   const suspectNodes = nodes.filter(
     (n) => n.status === 'warning' || n.status === 'alert' || n.status === 'calibrating' || n.status === 'offline'
@@ -54,6 +66,16 @@ export const InvestigationsPage: React.FC = () => {
           When telemetry residuals deviate from expected statistical limits, VeyraSense treats the deviation as an anomaly hypothesis to be verified through physical challenge routines before raising actionable alarms.
         </p>
       </div>
+
+      <section className="clay-surface space-y-4 p-6">
+        <div className="flex items-center justify-between"><h3 className="font-black">Persisted anomaly evidence and competing hypotheses</h3><span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase">{environment}</span></div>
+        {research.filter((r) => r.record_type === 'anomaly').length === 0 ? <p className="text-sm text-slate-500">No anomaly records have been detected in this environment.</p> : research.filter((r) => r.record_type === 'anomaly').map((record) => {
+          const analysis = research.find((r) => r.record_type === 'hypothesis_analysis' && r.related_record_id === record.id);
+          const investigation = research.find((r) => r.record_type === 'investigation' && r.related_record_id === record.id);
+          const fingerprint = research.find((r) => r.record_type === 'response_fingerprint' && r.related_record_id === record.id);
+          return <article key={record.id} className="rounded-xl bg-slate-50 p-4"><div className="flex flex-wrap justify-between gap-2"><b>{record.node_id} · {(record.payload.anomaly_types || []).join(', ')}</b><span className="text-xs">{record.payload.severity} · {Math.round(record.payload.confidence * 100)}% confidence</span></div><div className="mt-2 grid gap-2 text-xs sm:grid-cols-2"><span>Evidence: {Object.keys(record.payload.evidence || {}).join(', ')}</span><span>Selected: {analysis?.payload.selected || 'pending'}</span></div>{analysis && <div className="mt-2 grid gap-1 sm:grid-cols-2">{analysis.payload.hypotheses.map((h: any) => <div key={h.type} className="rounded bg-white p-2 text-xs"><b>{h.type.replaceAll('_', ' ')}</b> · {Math.round(h.confidence * 100)}%<div className="text-slate-500">Supports: {(h.supporting || []).join(', ') || 'none'} · Contradicts: {(h.contradicting || []).join(', ') || 'none'}</div></div>)}</div>}{investigation && <p className="mt-2 text-xs text-amber-800">Investigation: {investigation.payload.reason}. Suggested observations: {(investigation.payload.diagnostic_observations || []).join('; ')}</p>}{fingerprint && <p className="mt-2 text-xs text-blue-800">Response fingerprint: {fingerprint.payload.direction} · change {fingerprint.payload.absolute_change ?? 'n/a'} · corroborating channels {fingerprint.payload.cross_sensor_corroboration_count}</p>}</article>;
+        })}
+      </section>
 
       {isLoading ? (
         <div className="clay-surface p-8 text-center text-xs text-[#718096]">
@@ -107,9 +129,9 @@ export const InvestigationsPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2 self-end sm:self-auto">
-                  <Link to="/app/challenges">
+                  <Link to="/app/demonstration">
                     <Button variant="primary" size="sm" leftIcon={<Zap className="w-3.5 h-3.5" />}>
-                      Dispatch Physical Challenge
+                      Review diagnostic observations
                     </Button>
                   </Link>
                 </div>

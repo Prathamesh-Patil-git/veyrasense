@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Float, DateTime, ForeignKey, Index
+from sqlalchemy import String, Float, DateTime, ForeignKey, Index, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base, utc_now
 
@@ -47,11 +47,15 @@ class Measurement(Base):
         default="telemetry",
         nullable=False,
     )  # telemetry, challenge_response, recovery_imputation, manual_test
+    environment: Mapped[str] = mapped_column(
+        String(8), default="real", server_default="real", index=True, nullable=False
+    )  # real, demo
 
     # Composite indexes for high-frequency queries
     __table_args__ = (
         Index("idx_node_measured_at", "node_id", "measured_at"),
         Index("idx_type_measured_at", "measurement_type", "measured_at"),
+        CheckConstraint("environment IN ('real', 'demo')", name="ck_measurements_environment"),
     )
 
     # Relationships

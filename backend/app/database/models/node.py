@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import String, DateTime, Boolean, ForeignKey
+from sqlalchemy import String, DateTime, Boolean, ForeignKey, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base, utc_now
 
@@ -33,6 +33,9 @@ class SensorNode(Base):
         index=True,
         nullable=False,
     )  # pending, connected, offline, revoked
+    environment: Mapped[str] = mapped_column(
+        String(8), default="real", server_default="real", index=True, nullable=False
+    )  # real, demo
     registered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,
@@ -64,6 +67,10 @@ class SensorNode(Base):
         nullable=True,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("environment IN ('real', 'demo')", name="ck_sensor_nodes_environment"),
+    )
 
     # Relationships
     department: Mapped["Department"] = relationship("Department", back_populates="nodes")

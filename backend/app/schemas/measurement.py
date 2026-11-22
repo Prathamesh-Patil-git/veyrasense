@@ -22,6 +22,7 @@ class MeasurementCreate(MeasurementBase):
 class MeasurementResponse(MeasurementBase):
     id: int
     received_at: datetime
+    environment: str = "real"
     node_identifier: Optional[str] = None
     department_name: Optional[str] = None
 

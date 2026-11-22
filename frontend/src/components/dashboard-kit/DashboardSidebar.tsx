@@ -18,9 +18,11 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  FlaskConical,
 } from 'lucide-react';
 import { VeyraLogo } from '../common/VeyraLogo';
 import { api } from '../../services/api';
+import { useEnvironment } from '../../context/EnvironmentContext';
 
 interface NavItem {
   to: string;
@@ -49,6 +51,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
   onCloseMobileDrawer,
 }) => {
   const location = useLocation();
+  const { environment, setEnvironment } = useEnvironment();
   const [liveCounts, setLiveCounts] = useState<{ nodes: number | null; alerts: number | null }>({
     nodes: null,
     alerts: null,
@@ -56,7 +59,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
 
   useEffect(() => {
     let mounted = true;
-    api.getDashboardOverview()
+    api.getDashboardOverview(undefined, environment)
       .then((data) => {
         if (mounted) {
           setLiveCounts({
@@ -71,7 +74,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
     return () => {
       mounted = false;
     };
-  }, [location.pathname]);
+  }, [location.pathname, environment]);
 
   const navGroups: NavGroup[] = [
     {
@@ -108,6 +111,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
     {
       title: 'Intelligence & Gateway',
       items: [
+        { to: '/app/demonstration', label: 'Demonstration Center', icon: FlaskConical },
         { to: '/app/ml', label: 'ML Model Management', icon: Sparkles },
         { to: '/app/analytics', label: 'Analytics & Reports', icon: BarChart3 },
         { to: '/app/audit', label: 'Audit Logs', icon: FileText },
@@ -154,6 +158,13 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
 
       {/* Navigation Groups List */}
       <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6 scrollbar-thin">
+        <label className="block mx-1 mb-4 rounded-xl bg-[#1F2C46] p-3 text-[10px] font-bold uppercase tracking-wide text-slate-300" title="Select data environment">
+          {(!collapsed || isMobileDrawer) && <span className="mb-2 block">Environment</span>}
+          <select aria-label="Data environment" value={environment} onChange={(event) => setEnvironment(event.target.value as 'real' | 'demo')} className="w-full rounded-lg bg-[#172238] px-2 py-2 text-xs font-bold normal-case tracking-normal text-white outline-none">
+            <option value="real">Real sensors</option>
+            <option value="demo">Demonstration</option>
+          </select>
+        </label>
         {navGroups.map((group, groupIdx) => (
           <div key={groupIdx} className="space-y-1">
             {(!collapsed || isMobileDrawer) && (

@@ -32,14 +32,14 @@ class MQTTIngestionService:
     """Core MQTT packet processor and deduplication engine."""
 
     # Sliding window of processed (node_id, sequence_num) for deduplication
-    _recent_packets: Set[Tuple[str, int]] = set()
-    _recent_order: list[Tuple[str, int]] = []
+    _recent_packets: Set[Tuple[str, int, str]] = set()
+    _recent_order: list[Tuple[str, int, str]] = []
     _max_dedup_cache = 1000
 
     @classmethod
-    def _is_duplicate(cls, node_id: str, sequence_num: int) -> bool:
+    def _is_duplicate(cls, node_id: str, sequence_num: int, environment: str = "real") -> bool:
         """Check if packet with this sequence number was already processed."""
-        key = (node_id, sequence_num)
+        key = (node_id, sequence_num, environment)
         if key in cls._recent_packets:
             return True
         cls._recent_packets.add(key)
@@ -61,6 +61,7 @@ class MQTTIngestionService:
         db: Session,
         topic: str,
         payload_raw: str | bytes,
+        environment: str = "real",
     ) -> Dict[str, Any]:
         """Process incoming telemetry message with identity check and deduplication.
 
@@ -106,7 +107,9 @@ class MQTTIngestionService:
             }
 
         # 4. NODE EXISTENCE & PROVISIONING STATUS CHECK
-        node = db.query(SensorNode).filter(SensorNode.node_id == topic_node_id).first()
+        if environment not in {"real", "demo"}:
+            return {"status": "rejected", "detail": "Invalid telemetry environment"}
+        node = db.query(SensorNode).filter(SensorNode.node_id == topic_node_id, SensorNode.environment == environment).first()
         if not node:
             return {"status": "rejected", "detail": f"Unknown sensor node ID '{topic_node_id}'"}
 
@@ -117,7 +120,7 @@ class MQTTIngestionService:
         # 5. DEDUPLICATION CHECK
         sequence_num = payload.get("sequence_num")
         if sequence_num is not None and isinstance(sequence_num, int):
-            if cls._is_duplicate(topic_node_id, sequence_num):
+            if cls._is_duplicate(topic_node_id, sequence_num, environment):
                 logger.info(f"Dropped duplicate sequence #{sequence_num} from node '{topic_node_id}'")
                 return {"status": "duplicate", "detail": f"Duplicate sequence #{sequence_num} dropped."}
 
@@ -130,6 +133,7 @@ class MQTTIngestionService:
         # 7. INGEST MEASUREMENTS INTO DATABASE
         sensors_dict = payload.get("sensors", {})
         ingested_count = 0
+        new_measurements: list[Measurement] = []
 
         # Retrieve attached sensors for this node
         attached_sensors = {s.sensor_id: s for s in node.sensors}
@@ -170,9 +174,16 @@ class MQTTIngestionService:
                 message_uid=f"{topic_node_id}-{sequence_num or 0}-{channel_name}-{int(now.timestamp())}",
                 measured_at=now,
                 received_at=now,
+                environment=environment,
             )
             db.add(m)
+            new_measurements.append(m)
             ingested_count += 1
+
+        db.flush()
+        from app.services.research_service import ResearchService
+        for measurement in new_measurements:
+            ResearchService.analyze_measurement(db, measurement)
 
         db.commit()
         return {
@@ -205,13 +216,17 @@ class MQTTIngestionService:
         except Exception as e:
             return {"status": "rejected", "detail": f"Invalid JSON status payload: {str(e)}"}
 
-        node = db.query(SensorNode).filter(SensorNode.node_id == topic_node_id).first()
+        node = db.query(SensorNode).filter(SensorNode.node_id == topic_node_id, SensorNode.environment == "real").first()
         if not node:
             return {"status": "rejected", "detail": f"Unknown sensor node ID '{topic_node_id}'"}
 
         status_val = payload.get("status", "").lower()
         if status_val == "offline":
+            was_online = node.status != "offline"
             node.status = "offline"
+            if was_online:
+                from app.services.research_service import ResearchService
+                ResearchService.record_communication_event(db, node.node_id, "real", "Mosquitto offline status or Last Will and Testament received.")
             if node.provisioning_status != "revoked":
                 node.provisioning_status = "offline"
             db.commit()

@@ -1,10 +1,12 @@
 from datetime import datetime, timezone
+import json
 from typing import Optional, List
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import Session
 from app.database.models.node import SensorNode
 from app.database.models.department import Department
 from app.database.models.measurement import Measurement
+from app.database.models.research_record import ResearchRecord
 from app.schemas.dashboard import (
     DashboardOverviewResponse,
     RecentTelemetryItem,
@@ -20,6 +22,7 @@ class DashboardService:
     def get_overview(
         db: Session,
         department_id: Optional[int] = None,
+        environment: str = "real",
     ) -> DashboardOverviewResponse:
         dept_name = "All Departments"
         active_dept_id: int | str = "all"
@@ -32,24 +35,41 @@ class DashboardService:
 
         # Query node counts
         node_query = select(SensorNode)
+        node_query = node_query.where(SensorNode.environment == environment)
         if department_id is not None:
             node_query = node_query.where(SensorNode.department_id == department_id)
 
         all_nodes = db.scalars(node_query).all()
         registered_nodes = len(all_nodes)
         online_nodes = sum(1 for n in all_nodes if n.status in ["online", "healthy"])
-        investigations = sum(1 for n in all_nodes if n.status in ["warning", "alert"])
+        investigation_query = select(ResearchRecord).join(SensorNode, ResearchRecord.node_id == SensorNode.node_id).where(
+            ResearchRecord.environment == environment, ResearchRecord.record_type == "investigation",
+            SensorNode.environment == environment,
+        ).order_by(ResearchRecord.id.desc())
+        if department_id is not None:
+            investigation_query = investigation_query.where(SensorNode.department_id == department_id)
+        investigation_rows = db.scalars(investigation_query).all()
+        latest_cases: dict[tuple[str, int | None], ResearchRecord] = {}
+        for row in investigation_rows:
+            latest_cases.setdefault((row.node_id, row.related_record_id), row)
+        investigations = sum(1 for row in latest_cases.values() if json.loads(row.payload).get("status") == "active")
         calibrating_nodes = sum(1 for n in all_nodes if n.status == "calibrating")
 
-        # Validated recoveries count (measurements marked with synthetic_recovery quality)
-        recovery_query = select(func.count(Measurement.id)).where(
-            Measurement.quality == "synthetic_recovery"
+        # Count only recovery candidates that passed independent validation.
+        recovery_query = select(ResearchRecord).join(SensorNode, ResearchRecord.node_id == SensorNode.node_id).where(
+            ResearchRecord.record_type == "recovery_validation", ResearchRecord.environment == environment,
+            SensorNode.environment == environment,
         )
         if department_id is not None:
-            recovery_query = recovery_query.join(SensorNode).where(
-                SensorNode.department_id == department_id
-            )
-        validated_recoveries = db.scalar(recovery_query) or 0
+            recovery_query = recovery_query.where(SensorNode.department_id == department_id)
+        validated_recoveries = sum(1 for row in db.scalars(recovery_query).all() if json.loads(row.payload).get("decision") == "accepted")
+        hypothesis_query = select(ResearchRecord).join(SensorNode, ResearchRecord.node_id == SensorNode.node_id).where(
+            ResearchRecord.environment == environment, ResearchRecord.record_type == "hypothesis_analysis",
+            SensorNode.environment == environment,
+        )
+        if department_id is not None:
+            hypothesis_query = hypothesis_query.where(SensorNode.department_id == department_id)
+        sensor_fault_count = sum(1 for row in db.scalars(hypothesis_query).all() if json.loads(row.payload).get("selected") == "sensor_fault")
 
         # Health calculations
         network_health = (
@@ -57,12 +77,10 @@ class DashboardService:
             if registered_nodes > 0
             else 100.0
         )
-        comm_health = (
-            round(((registered_nodes - investigations) / registered_nodes) * 100, 1)
-            if registered_nodes > 0
-            else 100.0
-        )
-        quality_score = network_health if registered_nodes > 0 else 100.0
+        comm_health = network_health
+        measurement_total = db.scalar(select(func.count(Measurement.id)).where(Measurement.environment == environment)) or 0
+        good_measurements = db.scalar(select(func.count(Measurement.id)).where(Measurement.environment == environment, Measurement.quality == "good")) or 0
+        quality_score = round(good_measurements / measurement_total * 100, 1) if measurement_total else 0.0
 
         # Build Primary Metric Cards
         metrics: List[MetricSummary] = [
@@ -82,7 +100,7 @@ class DashboardService:
                 unit="nodes",
                 change=f"{network_health}% operational",
                 change_type="positive" if network_health >= 90 else "neutral",
-                timeframe="real-time ping",
+                timeframe="current node status",
                 accent="mint",
                 sparkline=[],
             ),
@@ -100,9 +118,9 @@ class DashboardService:
                 label="Validated Recoveries",
                 value=validated_recoveries,
                 unit="points",
-                change="Zero hallucinated",
-                change_type="positive",
-                timeframe="provenance verified",
+                change="Independently validated",
+                change_type="positive" if validated_recoveries else "neutral",
+                timeframe="accepted recovery candidates",
                 accent="blue",
                 sparkline=[],
             ),
@@ -115,6 +133,7 @@ class DashboardService:
             latest_m = db.scalar(
                 select(Measurement)
                 .where(Measurement.node_id == n.id)
+                .where(Measurement.environment == environment)
                 .order_by(Measurement.measured_at.desc())
                 .limit(1)
             )
@@ -139,8 +158,6 @@ class DashboardService:
                     unit=latest_m.unit if latest_m else "",
                     health_status=n.status,
                     last_received=last_rec,
-                    variance_score=0.0,
-                    confidence_level=100.0 if n.status in ["online", "healthy"] else 0.0,
                 )
             )
 
@@ -157,7 +174,7 @@ class DashboardService:
                     id=f"evt-{n.id}-{idx}",
                     timestamp=event_ts,
                     node_id=n.node_id,
-                    event_type="Node Registered" if idx == 0 else "Heartbeat Received",
+                    event_type="Heartbeat Received" if n.last_seen_at else "Node Registered",
                     message=f"Node {n.name} ({n.node_id}) status: {n.status.upper()}",
                     severity="success" if n.status in ["online", "healthy"] else "warning",
                     department_id=n.department_id,
@@ -172,7 +189,7 @@ class DashboardService:
             network_health_percent=network_health,
             communication_health_percent=comm_health,
             measurement_quality_percent=quality_score,
-            sensor_fault_count=investigations,
+            sensor_fault_count=sensor_fault_count,
             active_department_name=dept_name,
             active_department_id=active_dept_id,
             metrics=metrics,
@@ -180,4 +197,5 @@ class DashboardService:
             recent_activity=recent_activity,
             server_time=datetime.now(timezone.utc),
             is_live_backend=True,
+            environment=environment,
         )

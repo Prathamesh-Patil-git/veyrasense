@@ -13,7 +13,7 @@ import {
 import { useDepartment } from '../../context/DepartmentContext';
 import type { SensorTelemetryItem, ActivityEvent } from '../../mock/dashboardData';
 import { api } from '../../services/api';
-import type { ApiDashboardOverview } from '../../services/api';
+import type { ApiDashboardOverview, ApiResearchSummary } from '../../services/api';
 import { DashboardBanner } from '../../components/dashboard-kit/DashboardBanner';
 import { MetricCard } from '../../components/dashboard-kit/MetricCard';
 import { NetworkHealthSummary } from '../../components/dashboard-kit/NetworkHealthSummary';
@@ -21,20 +21,26 @@ import { SensorTelemetryTable } from '../../components/dashboard-kit/SensorTelem
 import { RecentActivityFeed } from '../../components/dashboard-kit/RecentActivityFeed';
 import { GatewayHub3D } from '../../components/3d/GatewayHub3D';
 import { Button } from '../../components/ui/Button';
+import { useEnvironment } from '../../context/EnvironmentContext';
 
 export const OverviewPage: React.FC = () => {
   const { selectedDepartmentId, activeDepartment } = useDepartment();
+  const { environment } = useEnvironment();
 
   const [loading, setLoading] = useState<boolean>(true);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [liveData, setLiveData] = useState<ApiDashboardOverview | null>(null);
+  const [research, setResearch] = useState<ApiResearchSummary | null>(null);
+
+  useEffect(() => { api.getResearchSummary(environment).then(setResearch).catch(() => setResearch(null)); }, [environment]);
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
     setBackendError(null);
     try {
       const data = await api.getDashboardOverview(
-        selectedDepartmentId === 'all' ? undefined : selectedDepartmentId
+        selectedDepartmentId === 'all' ? undefined : selectedDepartmentId,
+        environment
       );
       setLiveData(data);
     } catch (err: any) {
@@ -43,7 +49,7 @@ export const OverviewPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedDepartmentId]);
+  }, [selectedDepartmentId, environment]);
 
   useEffect(() => {
     loadDashboardData();
@@ -138,10 +144,10 @@ export const OverviewPage: React.FC = () => {
     unit: t.unit,
     healthStatus: t.health_status,
     lastReceived: t.last_received,
-    varianceScore: `${t.variance_score}σ`,
+    varianceScore: t.variance_score == null ? '' : String(t.variance_score),
     protocol: 'Mosquitto MQTT',
     firmware: 'ESP32 Firmware',
-    sparkline: [t.variance_score, t.variance_score],
+    sparkline: [],
     hardwareModel: t.sensor_type,
   }));
 
@@ -298,6 +304,13 @@ export const OverviewPage: React.FC = () => {
 
       {/* 5. Chronological Recent Activity Feed */}
       <RecentActivityFeed events={activityEvents} />
+      <section className="clay-surface p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-lg font-black">Research pipeline</h2><span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase ${environment === 'demo' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>{environment === 'demo' ? 'Simulated dataset' : 'Real sensor dataset'}</span></div>
+        {research ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">{[
+          ['Measurements', research.measurements], ['Anomalies', research.anomalies], ['Hypotheses', research.hypothesis_analyses], ['Investigations', research.active_investigations], ['Recovery candidates', research.recovery_candidates], ['Trusted measurements', research.trusted_measurements],
+        ].map(([label, value]) => <div key={String(label)} className="rounded-xl bg-slate-50 p-3"><div className="text-[10px] font-bold uppercase text-slate-500">{label}</div><div className="mt-1 text-xl font-black">{value}</div></div>)}</div> : <p className="text-sm text-slate-500">Research summary is not available.</p>}
+        {environment === 'demo' && research?.evaluation && <p className="text-xs text-slate-600">Evaluation uses {research.evaluation.labelled_completed_scenarios} completed scenarios and their ground truth. Precision: {research.evaluation.anomaly_precision == null ? 'not enough labelled outcomes' : `${(Number(research.evaluation.anomaly_precision) * 100).toFixed(1)}%`} · Recall: {research.evaluation.anomaly_recall == null ? 'not enough labelled outcomes' : `${(Number(research.evaluation.anomaly_recall) * 100).toFixed(1)}%`}</p>}
+      </section>
     </div>
   );
 };

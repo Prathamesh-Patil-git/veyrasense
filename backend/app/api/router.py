@@ -7,6 +7,8 @@ from app.api.routes import (
     sensor_profiles,
     measurements,
     dashboard,
+    scenarios,
+    research,
 )
 
 api_router = APIRouter()
@@ -18,3 +20,5 @@ api_router.include_router(nodes.router)
 api_router.include_router(sensor_profiles.router)
 api_router.include_router(measurements.router)
 api_router.include_router(dashboard.router)
+api_router.include_router(scenarios.router)
+api_router.include_router(research.router)

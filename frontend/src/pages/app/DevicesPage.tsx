@@ -23,6 +23,7 @@ import type {
   ApiNodeAuditResponse,
 } from '../../services/api';
 import { Button } from '../../components/ui/Button';
+import { useEnvironment } from '../../context/EnvironmentContext';
 
 // Utility to generate candidate node ID for the form
 function generateCandidateNodeId(prefix: string = 'ESP32'): string {
@@ -44,6 +45,7 @@ const DEFAULT_CORE_DEPARTMENTS: ApiDepartment[] = [
 ];
 
 export const DevicesPage: React.FC = () => {
+  const { environment } = useEnvironment();
   const [nodes, setNodes] = useState<ApiNode[]>([]);
   const [departments, setDepartments] = useState<ApiDepartment[]>(DEFAULT_CORE_DEPARTMENTS);
   const [loading, setLoading] = useState<boolean>(true);
@@ -83,8 +85,8 @@ export const DevicesPage: React.FC = () => {
       setLoading(true);
       setError(null);
       const [nodesData, deptsData] = await Promise.all([
-        api.getNodes(),
-        api.getDepartments(),
+        api.getNodes(undefined, environment),
+        api.getDepartments(environment),
       ]);
       setNodes(nodesData);
       const effectiveDepts = deptsData.length > 0 ? deptsData : DEFAULT_CORE_DEPARTMENTS;
@@ -98,7 +100,7 @@ export const DevicesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [environment]);
 
   useEffect(() => {
     fetchNodesAndDepts();
@@ -118,6 +120,7 @@ export const DevicesPage: React.FC = () => {
 
   const handleProvisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (environment !== 'real') return;
     if (!formName.trim()) {
       alert('Node name is required.');
       return;
@@ -153,6 +156,7 @@ export const DevicesPage: React.FC = () => {
   };
 
   const handleRotateCredentials = async (nodeId: string) => {
+    if (environment !== 'real') return;
     if (!window.confirm(`Are you sure you want to rotate credentials for node ${nodeId}? Any currently connected ESP32 using existing credentials will be disconnected until re-flashed.`)) {
       return;
     }
@@ -266,6 +270,7 @@ export const DevicesPage: React.FC = () => {
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-200">
+      {environment === 'demo' && <div className="rounded-xl bg-amber-100 p-4 text-sm font-bold text-amber-900">Demonstration device records are read only. Provisioning and credential changes affect real hardware and are disabled here.</div>}
       {/* Page Title & Provisioning Action Header */}
       <div className="clay-surface p-6 sm:p-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#F2F3EE]">
@@ -289,7 +294,7 @@ export const DevicesPage: React.FC = () => {
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span>Sync Fleet</span>
             </Button>
-            <Button
+            {environment === 'real' && <Button
               variant="primary"
               size="sm"
               onClick={() => {
@@ -300,11 +305,11 @@ export const DevicesPage: React.FC = () => {
             >
               <Plus className="w-4 h-4" />
               <span>Register & Provision Node</span>
-            </Button>
+            </Button>}
           </div>
         </div>
         <p className="text-xs sm:text-sm text-[#5A687C] mt-3 leading-relaxed max-w-3xl">
-          Securely provision industrial ESP32 microcontroller nodes. The gateway generates unique, non-reusable cryptographic secrets, provisions per-node Mosquitto MQTT topic ACLs, and configures identical reusable C++ firmware for field deployment.
+          {environment === 'demo' ? 'Simulated device records are isolated from the physical MQTT fleet. Real device provisioning and credential changes are only available in the real sensor environment.' : 'Register and manage physical ESP32 nodes connected through the existing Mosquitto MQTT broker.'}
         </p>
 
         {error && (
@@ -391,6 +396,7 @@ export const DevicesPage: React.FC = () => {
                     <span className="text-[#718096]">Firmware:</span>
                     <span className="font-mono font-semibold text-[#172238]">{node.firmware_version}</span>
                   </div>
+                  {node.sensor_types?.length ? <div className="flex justify-between gap-3"><span className="text-[#718096]">Sensors:</span><span className="text-right font-semibold text-[#172238]">{node.sensor_types.join(', ')}</span></div> : null}
                   <div className="flex justify-between">
                     <span className="text-[#718096]">Protocol:</span>
                     <span className="font-semibold text-[#172238]">MQTT (Port 1883)</span>
@@ -412,14 +418,14 @@ export const DevicesPage: React.FC = () => {
 
               {/* Node Card Actions */}
               <div className="pt-3 border-t border-[#F2F3EE] flex flex-wrap items-center justify-between gap-2 mt-4 text-xs">
-                <button
+                {environment === 'real' && <button
                   onClick={() => handleEditNode(node)}
                   className="flex items-center gap-1 text-[11px] font-semibold text-[#134685] hover:text-[#0B356B]"
                   title="Edit device information"
                 >
                   <Pencil className="w-3.5 h-3.5" />
                   <span>Edit</span>
-                </button>
+                </button>}
                 <button
                   onClick={() => handleViewAudit(node.node_id)}
                   className="flex items-center gap-1 text-[11px] font-semibold text-[#718096] hover:text-[#172238]"
@@ -431,23 +437,23 @@ export const DevicesPage: React.FC = () => {
 
                 {!isRevoked ? (
                   <div className="flex items-center gap-2">
-                    <button
+                {environment === 'real' && <button
                       onClick={() => handleRotateCredentials(node.node_id)}
                       className="px-2.5 py-1 rounded-xl text-[11px] font-semibold text-[#875B00] bg-[#FFF9DE] hover:bg-[#FFF3C2] transition-colors"
                       title="Rotate Node Secret"
                     >
                       Rotate
-                    </button>
-                    <button
+                </button>}
+                    {environment === 'real' && <button
                       onClick={() => handleRevokeNode(node.node_id)}
                       className="px-2.5 py-1 rounded-xl text-[11px] font-semibold text-[#A82824] bg-[#FDF0F0] hover:bg-[#FCE2E2] transition-colors"
                       title="Remove from active fleet"
                     >
                       <span className="inline-flex items-center gap-1"><Trash2 className="w-3 h-3" />Remove</span>
-                    </button>
+                    </button>}
                   </div>
                 ) : (
-                  <button
+                  environment === 'real' && <button
                     onClick={() => handleRestoreNode(node.node_id)}
                     className="px-2.5 py-1 rounded-xl text-[11px] font-semibold text-[#0C5A37] bg-[#E8FAF1] hover:bg-[#D9F4E5] transition-colors"
                     title="Restore this device"
