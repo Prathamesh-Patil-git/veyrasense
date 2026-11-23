@@ -531,7 +531,7 @@ export const DevicesPage: React.FC = () => {
                   <button type="button" onClick={() => handleCopy(mqttCredentials.mqtt_password, 'conn_password')} className="shrink-0 font-bold text-[#134685]">{copiedKey === 'conn_password' ? 'Copied' : 'Copy'}</button>
                 </div>
                 {['localhost', '127.0.0.1', '0.0.0.0'].includes(mqttCredentials.mqtt_broker_host) && <p className="text-amber-800">This broker address is loopback/wildcard and will not work from an ESP32. Configure the gateway MQTT broker address to its Raspberry Pi LAN IP, then generate credentials again.</p>}
-                <p className="text-[11px] text-[#718096]">After updating firmware, restart the ESP32. Its status will change from pending to connected when it publishes.</p>
+                <p className="text-[11px] text-[#718096]">After generation, reload Mosquitto on the Pi with <code>sudo systemctl kill -s HUP mosquitto</code> to load the updated password and ACL files. Then update local firmware config and restart the ESP32; its status changes from pending to connected when it publishes.</p>
               </div>}
             </section>
 
