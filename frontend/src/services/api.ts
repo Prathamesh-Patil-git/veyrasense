@@ -94,6 +94,20 @@ export interface ApiNodeRotateCredentialsResponse {
   warning: string;
 }
 
+export interface ApiNodeMqttCredentialsResponse {
+  node_id: string;
+  mqtt_username: string;
+  mqtt_password: string;
+  mqtt_broker_host: string;
+  mqtt_broker_port: number;
+  mqtt_topic_telemetry: string;
+  mqtt_topic_status: string;
+  mqtt_topic_commands: string;
+  credentials_rotated_at: string;
+  provisioning_status: string;
+  warning: string;
+}
+
 export interface ApiNodeRevokeResponse {
   node_id: string;
   status: string;
@@ -383,6 +397,12 @@ class ApiService {
 
   async rotateNodeCredentials(nodeId: string): Promise<ApiNodeRotateCredentialsResponse> {
     return this.request<ApiNodeRotateCredentialsResponse>(`/nodes/${nodeId}/rotate-credentials`, {
+      method: 'POST',
+    });
+  }
+
+  async renewNodeMqttCredentials(nodeId: string): Promise<ApiNodeMqttCredentialsResponse> {
+    return this.request<ApiNodeMqttCredentialsResponse>(`/nodes/${nodeId}/mqtt-credentials`, {
       method: 'POST',
     });
   }

@@ -1,5 +1,5 @@
 from typing import List, Optional, Literal
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 from app.database.connection import get_db
 from app.database.models.department import Department
@@ -13,6 +13,7 @@ from app.schemas.node import (
     NodeProvisionRequest,
     NodeProvisionResponse,
     NodeRotateCredentialsResponse,
+    NodeMqttCredentialsResponse,
     NodeRevokeResponse,
     NodeAuditResponse,
     NodeFirmwareConfigResponse,
@@ -148,6 +149,32 @@ def rotate_node_credentials(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
+        )
+
+
+@router.post("/{node_id}/mqtt-credentials", response_model=NodeMqttCredentialsResponse)
+def renew_node_mqtt_credentials(
+    node_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_admin: Administrator = Depends(get_current_admin),
+):
+    """Issue a one-time MQTT-only password reveal for reconnecting a real node."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        client_ip = request.client.host if request.client else None
+        return NodeService.rotate_mqtt_credentials(
+            db=db,
+            node_id=node_id,
+            actor=current_admin.email,
+            ip_address=client_ip,
+        )
+    except ValueError as e:
+        message = str(e)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND if "does not exist" in message else status.HTTP_400_BAD_REQUEST,
+            detail=message,
         )
 
 

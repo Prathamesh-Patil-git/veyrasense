@@ -97,6 +97,20 @@ class NodeRotateCredentialsResponse(BaseModel):
     warning: str = "Credentials successfully rotated. Existing keys are now invalid. Update the ESP32 firmware config immediately."
 
 
+class NodeMqttCredentialsResponse(BaseModel):
+    node_id: str
+    mqtt_username: str
+    mqtt_password: str = Field(..., description="One-time MQTT password reveal; only its hash is stored")
+    mqtt_broker_host: str
+    mqtt_broker_port: int
+    mqtt_topic_telemetry: str
+    mqtt_topic_status: str
+    mqtt_topic_commands: str
+    credentials_rotated_at: datetime
+    provisioning_status: str
+    warning: str = "Save this MQTT password now. It cannot be retrieved later; generating another password invalidates this one."
+
+
 class NodeRevokeResponse(BaseModel):
     node_id: str
     status: str

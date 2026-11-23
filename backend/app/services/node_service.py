@@ -17,6 +17,7 @@ from app.schemas.node import (
     NodeProvisionRequest,
     NodeProvisionResponse,
     NodeRotateCredentialsResponse,
+    NodeMqttCredentialsResponse,
     NodeRevokeResponse,
     NodeAuditResponse,
     NodeFirmwareConfigResponse,
@@ -289,7 +290,7 @@ class NodeService:
             mqtt_user=mqtt_username,
             mqtt_pass=raw_mqtt_password,
             device_key=raw_api_key,
-            broker_host=settings.MQTT_BROKER_HOST,
+            broker_host=settings.mqtt_device_broker_host,
             broker_port=settings.MQTT_BROKER_PORT,
         )
 
@@ -305,7 +306,7 @@ class NodeService:
             api_key=raw_api_key,
             mqtt_username=mqtt_username,
             mqtt_password=raw_mqtt_password,
-            mqtt_broker_host=settings.MQTT_BROKER_HOST,
+            mqtt_broker_host=settings.mqtt_device_broker_host,
             mqtt_broker_port=settings.MQTT_BROKER_PORT,
             mqtt_topic_telemetry=telemetry_topic,
             mqtt_topic_status=status_topic,
@@ -358,7 +359,7 @@ class NodeService:
             mqtt_user=node.mqtt_username or node_id,
             mqtt_pass=new_mqtt_pass,
             device_key=new_api_key,
-            broker_host=settings.MQTT_BROKER_HOST,
+            broker_host=settings.mqtt_device_broker_host,
             broker_port=settings.MQTT_BROKER_PORT,
         )
 
@@ -370,6 +371,54 @@ class NodeService:
             credentials_rotated_at=now,
             firmware_config_snippet=config_snippet,
             warning="Credentials successfully rotated. Existing keys are now invalid.",
+        )
+
+    @staticmethod
+    def rotate_mqtt_credentials(
+        db: Session,
+        node_id: str,
+        actor: str = "admin",
+        ip_address: Optional[str] = None,
+    ) -> NodeMqttCredentialsResponse:
+        """Issue a one-time MQTT password and reactivate a revoked real node."""
+        node = NodeService.get_node_by_node_id(db, node_id)
+        if not node:
+            raise ValueError(f"Sensor node '{node_id}' does not exist.")
+        if node.environment != "real":
+            raise ValueError("MQTT credentials are only available for real sensor nodes.")
+
+        mqtt_password = generate_secure_device_secret(24)
+        node.mqtt_username = node.mqtt_username or node.node_id
+        node.mqtt_password_hash = hash_mqtt_password(mqtt_password)
+        now = utc_now()
+        node.credentials_rotated_at = now
+        node.is_active = True
+        node.status = "offline"
+        node.provisioning_status = "pending"
+
+        db.commit()
+        db.refresh(node)
+        AuditService.log_action(
+            db=db,
+            action="mqtt_credentials_rotated",
+            entity_id=node_id,
+            actor=actor,
+            details=f"MQTT credentials rotated at {now.isoformat()}; node is {node.provisioning_status}.",
+            ip_address=ip_address,
+        )
+        MosquittoProvisioningService.sync_mosquitto_configuration(db)
+
+        return NodeMqttCredentialsResponse(
+            node_id=node_id,
+            mqtt_username=node.mqtt_username,
+            mqtt_password=mqtt_password,
+            mqtt_broker_host=settings.mqtt_device_broker_host,
+            mqtt_broker_port=settings.MQTT_BROKER_PORT,
+            mqtt_topic_telemetry=f"veyrasense/nodes/{node_id}/telemetry",
+            mqtt_topic_status=f"veyrasense/nodes/{node_id}/status",
+            mqtt_topic_commands=f"veyrasense/nodes/{node_id}/commands",
+            credentials_rotated_at=now,
+            provisioning_status=node.provisioning_status,
         )
 
     @staticmethod

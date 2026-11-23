@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     # MQTT & Mosquitto Provisioning
     MQTT_BROKER_HOST: str = "localhost"
     MQTT_BROKER_PORT: int = 1883
+    # Network address advertised to ESP32 clients; falls back to the internal host for compatibility.
+    MQTT_DEVICE_BROKER_HOST: str = ""
     MQTT_BACKEND_USERNAME: str = "veyrasense_backend"
     MQTT_BACKEND_PASSWORD: str = "veyrasense_internal_backend_key_secure"
     ANOMALY_TEMPERATURE_STEP_DELTA: float = 10.0
@@ -116,6 +118,10 @@ class Settings(BaseSettings):
     @property
     def mosquitto_conf_path(self) -> Path:
         return self.resolved_mosquitto_dir / "veyrasense.conf"
+
+    @property
+    def mqtt_device_broker_host(self) -> str:
+        return self.MQTT_DEVICE_BROKER_HOST.strip() or self.MQTT_BROKER_HOST
 
     @property
     def resolved_log_dir(self) -> Path:
