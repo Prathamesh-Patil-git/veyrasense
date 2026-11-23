@@ -1,46 +1,32 @@
-// ==============================================================================
-// VeyraSense ESP32 Node Configuration Template (config.h.example)
-// Copy this file to "config.h" and populate credentials provisioned via Dashboard.
-// NEVER COMMIT "config.h" WITH LIVE CREDENTIALS TO VERSION CONTROL.
-// ==============================================================================
+// Placeholder template for NODE-01. Copy to this folder as config.h.
+// Never commit config.h; the repository .gitignore excludes it.
 #ifndef VEYRASENSE_CONFIG_H
 #define VEYRASENSE_CONFIG_H
 
-// --- Wi-Fi Network Credentials ---
 #define WIFI_SSID           "YOUR_WIFI_NAME"
 #define WIFI_PASSWORD       "YOUR_WIFI_PASSWORD"
 
-// --- VeyraSense Edge Gateway (Raspberry Pi 5) ---
 #define MQTT_SERVER         "192.168.1.14"
 #define MQTT_PORT           1883
-// Existing firmware uses these names; keep them mapped to the settings above.
 #define MQTT_BROKER_HOST    MQTT_SERVER
 #define MQTT_BROKER_PORT    MQTT_PORT
 
-// --- Unique Node Identity & Dynamic Credentials ---
-#define VEYRASENSE_NODE_ID  "NODE-01"
 #define MQTT_USERNAME       "NODE-01"
 #define MQTT_PASSWORD       "YOUR_NODE_01_MQTT_PASSWORD"
-// For NODE-02, use these values instead (keep its existing sensor pin settings):
-// #define VEYRASENSE_NODE_ID  "NODE-02"
-// #define MQTT_USERNAME       "NODE-02"
-// #define MQTT_PASSWORD       "YOUR_NODE_02_MQTT_PASSWORD"
+#define VEYRASENSE_NODE_ID  MQTT_USERNAME
 
-// --- Per-Node MQTT Topics (Restricted strictly by Mosquitto ACL) ---
 #define MQTT_TOPIC_TELEMETRY "veyrasense/nodes/" VEYRASENSE_NODE_ID "/telemetry"
 #define MQTT_TOPIC_STATUS    "veyrasense/nodes/" VEYRASENSE_NODE_ID "/status"
 #define MQTT_TOPIC_COMMANDS  "veyrasense/nodes/" VEYRASENSE_NODE_ID "/commands"
 
-// --- Hardware Transducer Pinouts ---
-#define DHT_PIN             4    // GPIO 4 connected to DHT11 Signal pin
+#define DHT_PIN             32
 #define DHT_TYPE            DHT11
-#define MQ135_PIN           34   // GPIO 34 (ADC1_CH6 - Input only) for MQ-135 Analog A0
-#define STATUS_LED_PIN      2    // Built-in blue LED for connection status
+#define MQ135_PIN           34
+#define STATUS_LED_PIN      2
 
-// --- Timing Parameters ---
-#define TELEMETRY_INTERVAL_MS 5000  // Ingestion sample period in milliseconds
+#define TELEMETRY_INTERVAL_MS 5000
 #define NTP_SERVER            "pool.ntp.org"
-#define GMT_OFFSET_SEC        0     // UTC offset in seconds
+#define GMT_OFFSET_SEC        0
 #define DAYLIGHT_OFFSET_SEC   0
 
 #endif // VEYRASENSE_CONFIG_H
